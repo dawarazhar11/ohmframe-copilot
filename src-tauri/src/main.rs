@@ -76,6 +76,7 @@ fn capture_window(title: String) -> Result<String, String> {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_http::init())
         .invoke_handler(tauri::generate_handler![capture_screen, capture_window])
         .setup(|app| {
             // Get the main window - handle potential errors gracefully
