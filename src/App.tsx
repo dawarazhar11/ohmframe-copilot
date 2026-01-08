@@ -147,14 +147,18 @@ function App() {
     setIsLoadingStep(true);
 
     try {
-      // Get the file path - for Tauri we need the actual path
-      // @ts-ignore - webkitRelativePath may not be in types
-      const filePath = file.path || file.webkitRelativePath || file.name;
+      // Read file content as text (STEP files are text-based)
+      const fileContent = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(new Error("Failed to read file"));
+        reader.readAsText(file);
+      });
 
-      // For now, we'll read the file and pass content
-      // In production, we'd use the actual file path with Tauri's file dialog
-      const result = await invoke<StepAnalysisResult>("analyze_step_file", {
-        filePath: filePath,
+      // Pass file content and name to Rust for analysis
+      const result = await invoke<StepAnalysisResult>("analyze_step_content", {
+        content: fileContent,
+        filename: file.name,
       });
 
       if (result.success) {
