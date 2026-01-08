@@ -4,7 +4,9 @@ import { fetch } from "@tauri-apps/plugin-http";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { DfmResults } from "./components/DfmResults";
+import { ModelViewer } from "./components/ModelViewer";
 import type { DfmAnalysisResult, GroupedDfmResults } from "./lib/dfm/types";
+import type { MeshData, StepMeshResult } from "./lib/mesh/types";
 
 // Image compression settings to avoid 413 payload too large errors
 const MAX_WIDTH = 1920;
@@ -135,6 +137,8 @@ function App() {
   const [analysisMode, setAnalysisMode] = useState<AnalysisMode>("general");
   const [stepData, setStepData] = useState<StepAnalysisResult | null>(null);
   const [isLoadingStep, setIsLoadingStep] = useState(false);
+  const [meshData, setMeshData] = useState<MeshData | null>(null);
+  const [show3DViewer, setShow3DViewer] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const stepInputRef = useRef<HTMLInputElement>(null);
 
@@ -226,6 +230,20 @@ function App() {
       if (result.success) {
         setStepData(result);
 
+        // Also get mesh data for 3D viewer
+        try {
+          const meshResult = await invoke<StepMeshResult>("parse_step_mesh", {
+            content: fileContent,
+            filename: file.name,
+          });
+          if (meshResult.success && meshResult.mesh) {
+            setMeshData(meshResult.mesh);
+          }
+        } catch (meshErr) {
+          console.warn("Mesh generation failed (3D viewer disabled):", meshErr);
+          setMeshData(null);
+        }
+
         // Add system message about STEP file
         const stepMsg: Message = {
           id: `step-${Date.now()}`,
@@ -261,6 +279,8 @@ function App() {
 
   const clearStepData = () => {
     setStepData(null);
+    setMeshData(null);
+    setShow3DViewer(false);
   };
 
   const analyzeWithVision = async (prompt: string, image?: string) => {
@@ -463,11 +483,47 @@ function App() {
                 {msg.role === "assistant" ? (
                   // Check if we have structured DFM results
                   msg.dfmAnalysis && msg.dfmGrouped && msg.dfmStats ? (
-                    <DfmResults
-                      dfmAnalysis={msg.dfmAnalysis}
-                      dfmGrouped={msg.dfmGrouped}
-                      dfmStats={msg.dfmStats}
-                    />
+                    <div className="dfm-results-container">
+                      {/* View toggle for 3D/List when mesh data is available */}
+                      {meshData && (
+                        <div className="view-toggle">
+                          <button
+                            className={`view-btn ${!show3DViewer ? "active" : ""}`}
+                            onClick={() => setShow3DViewer(false)}
+                          >
+                            List View
+                          </button>
+                          <button
+                            className={`view-btn ${show3DViewer ? "active" : ""}`}
+                            onClick={() => setShow3DViewer(true)}
+                          >
+                            3D View
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Conditionally show 3D viewer or list view */}
+                      {show3DViewer && meshData ? (
+                        <ModelViewer
+                          meshData={meshData}
+                          dfmResults={msg.dfmAnalysis.ruleResults}
+                          onMarkerClick={(ruleId) => {
+                            // Switch to list view and scroll to rule
+                            setShow3DViewer(false);
+                            setTimeout(() => {
+                              const el = document.getElementById(`rule-${ruleId}`);
+                              el?.scrollIntoView({ behavior: "smooth", block: "center" });
+                            }, 100);
+                          }}
+                        />
+                      ) : (
+                        <DfmResults
+                          dfmAnalysis={msg.dfmAnalysis}
+                          dfmGrouped={msg.dfmGrouped}
+                          dfmStats={msg.dfmStats}
+                        />
+                      )}
+                    </div>
                   ) : (
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>
                       {msg.content}
