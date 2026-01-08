@@ -3,6 +3,17 @@ import { invoke } from "@tauri-apps/api/core";
 import { fetch } from "@tauri-apps/plugin-http";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { DfmResults } from "./components/DfmResults";
+import type { DfmAnalysisResult, GroupedDfmResults } from "./lib/dfm/types";
+
+interface DfmStats {
+  totalRules: number;
+  passedCount: number;
+  failedCount: number;
+  warningCount: number;
+  naCount: number;
+  criticalFailures: number;
+}
 
 interface Message {
   id: string;
@@ -10,6 +21,10 @@ interface Message {
   content: string;
   image?: string;
   timestamp: Date;
+  // DFM structured data (if available)
+  dfmAnalysis?: DfmAnalysisResult;
+  dfmGrouped?: GroupedDfmResults;
+  dfmStats?: DfmStats;
 }
 
 interface AnalysisRequest {
@@ -246,11 +261,16 @@ function App() {
 
       const data = await response.json();
 
+      // Create assistant message with optional DFM structured data
       const assistantMsg: Message = {
         id: `assistant-${Date.now()}`,
         role: "assistant",
         content: data.response || data.message,
         timestamp: new Date(),
+        // Include DFM structured data if available (DFM mode returns these)
+        dfmAnalysis: data.dfmAnalysis,
+        dfmGrouped: data.dfmGrouped,
+        dfmStats: data.dfmStats,
       };
       setMessages((prev) => [...prev, assistantMsg]);
     } catch (err) {
@@ -394,9 +414,18 @@ function App() {
               )}
               <div className="message-content">
                 {msg.role === "assistant" ? (
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {msg.content}
-                  </ReactMarkdown>
+                  // Check if we have structured DFM results
+                  msg.dfmAnalysis && msg.dfmGrouped && msg.dfmStats ? (
+                    <DfmResults
+                      dfmAnalysis={msg.dfmAnalysis}
+                      dfmGrouped={msg.dfmGrouped}
+                      dfmStats={msg.dfmStats}
+                    />
+                  ) : (
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {msg.content}
+                    </ReactMarkdown>
+                  )
                 ) : (
                   <p>{msg.content}</p>
                 )}
