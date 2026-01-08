@@ -6,6 +6,50 @@ import remarkGfm from "remark-gfm";
 import { DfmResults } from "./components/DfmResults";
 import type { DfmAnalysisResult, GroupedDfmResults } from "./lib/dfm/types";
 
+// Image compression settings to avoid 413 payload too large errors
+const MAX_WIDTH = 1920;
+const MAX_HEIGHT = 1080;
+const JPEG_QUALITY = 0.85;
+
+// Compress base64 image to reduce payload size
+function compressImage(base64: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+
+    img.onload = () => {
+      let { width, height } = img;
+
+      // Calculate new dimensions maintaining aspect ratio
+      if (width > MAX_WIDTH || height > MAX_HEIGHT) {
+        const ratio = Math.min(MAX_WIDTH / width, MAX_HEIGHT / height);
+        width = Math.round(width * ratio);
+        height = Math.round(height * ratio);
+      }
+
+      canvas.width = width;
+      canvas.height = height;
+
+      if (ctx) {
+        ctx.fillStyle = "#FFFFFF";
+        ctx.fillRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+
+        // Convert to JPEG for smaller file size
+        const dataUrl = canvas.toDataURL("image/jpeg", JPEG_QUALITY);
+        const compressedBase64 = dataUrl.split(",")[1];
+        resolve(compressedBase64);
+      } else {
+        reject(new Error("Could not get canvas context"));
+      }
+    };
+
+    img.onerror = () => reject(new Error("Failed to load image"));
+    img.src = `data:image/png;base64,${base64}`;
+  });
+}
+
 interface DfmStats {
   totalRules: number;
   passedCount: number;
@@ -116,14 +160,17 @@ function App() {
     try {
       // Call Tauri command to capture screen
       const screenshot = await invoke<string>("capture_screen");
-      setLastCapture(screenshot);
+
+      // Compress the screenshot to avoid 413 payload too large errors
+      const compressedScreenshot = await compressImage(screenshot);
+      setLastCapture(compressedScreenshot);
 
       // Add capture message
       const captureMsg: Message = {
         id: `capture-${Date.now()}`,
         role: "system",
         content: "Screen captured. Ask a question about what you see.",
-        image: screenshot,
+        image: compressedScreenshot,
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, captureMsg]);

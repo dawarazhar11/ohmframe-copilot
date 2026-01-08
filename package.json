@@ -1,6 +1,6 @@
 {
   "name": "ohmframe-copilot",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "AI-powered engineering co-pilot for CAD software",
   "private": true,
   "type": "module",
