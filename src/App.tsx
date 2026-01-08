@@ -16,6 +16,36 @@ interface AnalysisRequest {
   image: string;
   prompt: string;
   context?: string;
+  mode?: "general" | "dfm";
+  stepData?: StepAnalysisResult;
+}
+
+type AnalysisMode = "general" | "dfm";
+
+// STEP file analysis types (matches Rust structs)
+interface StepAnalysisResult {
+  success: boolean;
+  error?: string;
+  filename?: string;
+  bounding_box?: {
+    min: [number, number, number];
+    max: [number, number, number];
+    dimensions: [number, number, number];
+  };
+  volume_estimate?: number;
+  surface_area_estimate?: number;
+  topology?: {
+    num_solids: number;
+    num_shells: number;
+    num_faces: number;
+    num_edges: number;
+    num_vertices: number;
+  };
+  features?: {
+    cylindrical_faces: number;
+    planar_faces: number;
+    curved_faces: number;
+  };
 }
 
 const ENGINEERING_CONTEXT = `You are an expert engineering co-pilot with deep knowledge of:
@@ -43,7 +73,11 @@ function App() {
   const [lastCapture, setLastCapture] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState("");
   const [showSettings, setShowSettings] = useState(false);
+  const [analysisMode, setAnalysisMode] = useState<AnalysisMode>("general");
+  const [stepData, setStepData] = useState<StepAnalysisResult | null>(null);
+  const [isLoadingStep, setIsLoadingStep] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const stepInputRef = useRef<HTMLInputElement>(null);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -92,6 +126,77 @@ function App() {
     }
   }, []);
 
+  // Handle STEP file selection
+  const handleStepFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Check file extension
+    const ext = file.name.toLowerCase();
+    if (!ext.endsWith('.step') && !ext.endsWith('.stp')) {
+      const errorMsg: Message = {
+        id: `error-${Date.now()}`,
+        role: "system",
+        content: "Please select a STEP file (.step or .stp)",
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, errorMsg]);
+      return;
+    }
+
+    setIsLoadingStep(true);
+
+    try {
+      // Get the file path - for Tauri we need the actual path
+      // @ts-ignore - webkitRelativePath may not be in types
+      const filePath = file.path || file.webkitRelativePath || file.name;
+
+      // For now, we'll read the file and pass content
+      // In production, we'd use the actual file path with Tauri's file dialog
+      const result = await invoke<StepAnalysisResult>("analyze_step_file", {
+        filePath: filePath,
+      });
+
+      if (result.success) {
+        setStepData(result);
+
+        // Add system message about STEP file
+        const stepMsg: Message = {
+          id: `step-${Date.now()}`,
+          role: "system",
+          content: `STEP file loaded: ${result.filename}\n` +
+            `Topology: ${result.topology?.num_faces || 0} faces, ${result.topology?.num_edges || 0} edges\n` +
+            `Features: ${result.features?.cylindrical_faces || 0} cylindrical (potential holes), ` +
+            `${result.features?.planar_faces || 0} planar, ${result.features?.curved_faces || 0} curved`,
+          timestamp: new Date(),
+        };
+        setMessages((prev) => [...prev, stepMsg]);
+      } else {
+        throw new Error(result.error || "Failed to parse STEP file");
+      }
+    } catch (err) {
+      console.error("STEP analysis failed:", err);
+      const errorMsg: Message = {
+        id: `error-${Date.now()}`,
+        role: "system",
+        content: `STEP analysis failed: ${err instanceof Error ? err.message : "Unknown error"}`,
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, errorMsg]);
+      setStepData(null);
+    } finally {
+      setIsLoadingStep(false);
+      // Reset the input so the same file can be selected again
+      if (stepInputRef.current) {
+        stepInputRef.current.value = '';
+      }
+    }
+  }, []);
+
+  const clearStepData = () => {
+    setStepData(null);
+  };
+
   const analyzeWithVision = async (prompt: string, image?: string) => {
     if (!apiKey) {
       setShowSettings(true);
@@ -120,8 +225,14 @@ function App() {
         },
         body: JSON.stringify({
           image: image || lastCapture,
-          prompt: prompt,
-          context: ENGINEERING_CONTEXT,
+          prompt: stepData
+            ? `${prompt}\n\nSTEP File Data: ${JSON.stringify(stepData, null, 2)}`
+            : prompt,
+          mode: analysisMode,
+          // Only send custom context for general mode; DFM mode uses server-side prompt
+          ...(analysisMode === "general" ? { context: ENGINEERING_CONTEXT } : {}),
+          // Include STEP data if available
+          ...(stepData ? { stepData } : {}),
         } as AnalysisRequest),
       });
 
@@ -159,13 +270,23 @@ function App() {
     setInput("");
   };
 
-  const quickPrompts = [
+  const quickPromptsGeneral = [
     "What's happening in this design?",
     "Analyze this from first principles",
     "What could fail here?",
     "How can I improve manufacturability?",
     "Check tolerances and GD&T",
   ];
+
+  const quickPromptsDfm = [
+    "Full DFM analysis",
+    "Check for manufacturability issues",
+    "What's the DFM score?",
+    "How can I reduce cost?",
+    "Identify critical issues",
+  ];
+
+  const quickPrompts = analysisMode === "dfm" ? quickPromptsDfm : quickPromptsGeneral;
 
   return (
     <div className="app">
@@ -176,6 +297,23 @@ function App() {
           <span className="logo-frame">frame</span>
           <span className="logo-copilot">Copilot</span>
         </div>
+
+        {/* Mode Toggle */}
+        <div className="mode-toggle">
+          <button
+            className={`mode-btn ${analysisMode === "general" ? "active" : ""}`}
+            onClick={() => setAnalysisMode("general")}
+          >
+            General
+          </button>
+          <button
+            className={`mode-btn dfm ${analysisMode === "dfm" ? "active" : ""}`}
+            onClick={() => setAnalysisMode("dfm")}
+          >
+            DFM
+          </button>
+        </div>
+
         <div className="header-actions">
           <button
             className={`capture-btn ${isCapturing ? "capturing" : ""}`}
@@ -184,11 +322,37 @@ function App() {
           >
             {isCapturing ? "Capturing..." : "Capture Screen"}
           </button>
+          <button
+            className={`step-btn ${stepData ? "has-data" : ""} ${isLoadingStep ? "loading" : ""}`}
+            onClick={() => stepInputRef.current?.click()}
+            disabled={isLoadingStep}
+          >
+            {isLoadingStep ? "Loading..." : stepData ? "STEP ✓" : "STEP"}
+          </button>
+          <input
+            ref={stepInputRef}
+            type="file"
+            accept=".step,.stp"
+            onChange={handleStepFileSelect}
+            style={{ display: "none" }}
+          />
           <button className="settings-btn" onClick={() => setShowSettings(true)}>
             Settings
           </button>
         </div>
       </header>
+
+      {/* STEP File Info Banner */}
+      {stepData && (
+        <div className="step-banner">
+          <span className="step-filename">{stepData.filename}</span>
+          <span className="step-info">
+            {stepData.topology?.num_faces || 0} faces •{" "}
+            {stepData.features?.cylindrical_faces || 0} holes
+          </span>
+          <button className="step-clear" onClick={clearStepData}>×</button>
+        </div>
+      )}
 
       {/* Messages */}
       <main className="messages">

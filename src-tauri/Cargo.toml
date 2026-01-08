@@ -1,6 +1,6 @@
 [package]
 name = "ohmframe-copilot"
-version = "1.0.4"
+version = "1.0.5"
 description = "AI-powered engineering co-pilot for CAD software"
 authors = ["Ohmframe"]
 license = "MIT"
@@ -13,11 +13,17 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-shell = "2"
 tauri-plugin-http = "2"
+tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 screenshots = "0.7"
 base64 = "0.22"
 image = "0.24"
+
+# STEP file processing
+truck-stepio = "0.3"
+truck-topology = "0.3"
+truck-polymesh = "0.3"
 
 [features]
 default = ["custom-protocol"]
