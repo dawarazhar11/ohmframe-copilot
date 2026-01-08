@@ -6,9 +6,8 @@
   "permissions": [
     "core:default",
     "shell:allow-open",
-    "http:default",
     {
-      "identifier": "http:allow-fetch",
+      "identifier": "http:default",
       "allow": [
         { "url": "https://ai.ohmframe.com/**" },
         { "url": "https://*.ohmframe.com/**" }
