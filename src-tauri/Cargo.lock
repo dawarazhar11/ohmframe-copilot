@@ -2533,7 +2533,7 @@ dependencies = [
 
 [[package]]
 name = "ohmframe-copilot"
-version = "1.0.9"
+version = "1.0.10"
 dependencies = [
  "base64 0.22.1",
  "image",
@@ -2544,6 +2544,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
+ "tauri-plugin-fs",
  "tauri-plugin-http",
  "tauri-plugin-shell",
 ]

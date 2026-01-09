@@ -7,6 +7,7 @@ import { DfmResults } from "./components/DfmResults";
 import { ModelViewer } from "./components/ModelViewer";
 import type { DfmAnalysisResult, GroupedDfmResults } from "./lib/dfm/types";
 import type { MeshData, StepMeshResult } from "./lib/mesh/types";
+import { loadStepToMesh } from "./lib/stepLoader";
 
 // Image compression settings to avoid 413 payload too large errors
 const MAX_WIDTH = 1920;
@@ -230,18 +231,57 @@ function App() {
       if (result.success) {
         setStepData(result);
 
-        // Also get mesh data for 3D viewer
+        // Load mesh data using frontend OCCT loader for accurate 3D rendering
         try {
-          const meshResult = await invoke<StepMeshResult>("parse_step_mesh", {
-            content: fileContent,
-            filename: file.name,
-          });
-          if (meshResult.success && meshResult.mesh) {
-            setMeshData(meshResult.mesh);
+          console.log("[App] Attempting to load mesh with frontend OCCT loader...");
+          const occtMesh = await loadStepToMesh(fileContent);
+          console.log("[App] OCCT mesh result:", occtMesh);
+          if (occtMesh && occtMesh.vertices.length > 0) {
+            // Convert OCCT mesh to our MeshData format
+            const meshData: MeshData = {
+              vertices: occtMesh.vertices,
+              indices: occtMesh.indices,
+              normals: occtMesh.normals,
+              face_groups: [{
+                face_id: 0,
+                face_type: "solid",
+                start_index: 0,
+                triangle_count: occtMesh.indices.length / 3,
+                center: [
+                  (occtMesh.boundingBox.min[0] + occtMesh.boundingBox.max[0]) / 2,
+                  (occtMesh.boundingBox.min[1] + occtMesh.boundingBox.max[1]) / 2,
+                  (occtMesh.boundingBox.min[2] + occtMesh.boundingBox.max[2]) / 2,
+                ],
+              }],
+            };
+            console.log("[App] Setting mesh data from frontend loader:", {
+              vertexCount: meshData.vertices.length / 3,
+              indexCount: meshData.indices.length,
+              triangleCount: meshData.indices.length / 3,
+            });
+            setMeshData(meshData);
+          } else {
+            console.warn("[App] Frontend loader returned empty or null mesh, falling back to Rust");
+            throw new Error("Empty mesh from frontend loader");
           }
         } catch (meshErr) {
-          console.warn("Mesh generation failed (3D viewer disabled):", meshErr);
-          setMeshData(null);
+          console.warn("[App] Frontend mesh generation failed, trying Rust backend:", meshErr);
+          // Fallback to Rust backend
+          try {
+            console.log("[App] Trying Rust backend for mesh generation...");
+            const meshResult = await invoke<StepMeshResult>("parse_step_mesh", {
+              content: fileContent,
+              filename: file.name,
+            });
+            console.log("[App] Rust mesh result:", meshResult);
+            if (meshResult.success && meshResult.mesh) {
+              console.log("[App] Using Rust backend mesh (placeholder)");
+              setMeshData(meshResult.mesh);
+            }
+          } catch (rustErr) {
+            console.warn("[App] Rust mesh generation also failed:", rustErr);
+            setMeshData(null);
+          }
         }
 
         // Add system message about STEP file

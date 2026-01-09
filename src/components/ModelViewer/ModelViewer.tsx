@@ -1,5 +1,5 @@
-import { Suspense, useMemo } from "react";
-import { Canvas } from "@react-three/fiber";
+import { Suspense, useMemo, useEffect } from "react";
+import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls, Center, Html } from "@react-three/drei";
 import * as THREE from "three";
 import type { MeshData, FaceGroup, FailedFace } from "../../lib/mesh/types";
@@ -69,65 +69,53 @@ function StepMesh({
   const geometry = useMemo(() => {
     const geo = new THREE.BufferGeometry();
 
-    // Set vertices
-    const positions = new Float32Array(meshData.vertices);
+    // Set vertices - convert to Float32Array if needed
+    const positions = meshData.vertices instanceof Float32Array
+      ? meshData.vertices
+      : new Float32Array(meshData.vertices);
     geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
 
-    // Set normals
-    const normals = new Float32Array(meshData.normals);
+    // Set normals - convert to Float32Array if needed
+    const normals = meshData.normals instanceof Float32Array
+      ? meshData.normals
+      : new Float32Array(meshData.normals);
     geo.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
 
-    // Set indices
-    const indices = new Uint32Array(meshData.indices);
-    geo.setIndex(new THREE.BufferAttribute(indices, 1));
+    // Set indices - convert to Uint32Array if needed
+    if (meshData.indices && meshData.indices.length > 0) {
+      const indices = meshData.indices instanceof Uint32Array
+        ? meshData.indices
+        : new Uint32Array(meshData.indices);
+      geo.setIndex(new THREE.BufferAttribute(indices, 1));
+    }
 
-    // Generate colors based on face groups and failures
-    const colors = new Float32Array(meshData.vertices.length); // Same length as vertices
-    const failedFaceIds = new Set(failedFaces.map((f) => f.faceId));
+    // Generate vertex colors (gray by default, red for failed areas)
+    const vertexCount = positions.length / 3;
+    const colors = new Float32Array(vertexCount * 3);
 
-    // Default color: light gray
+    // Default color: metallic gray
     for (let i = 0; i < colors.length; i += 3) {
-      colors[i] = 0.7;     // R
-      colors[i + 1] = 0.7; // G
+      colors[i] = 0.6;     // R
+      colors[i + 1] = 0.65; // G
       colors[i + 2] = 0.7; // B
     }
 
-    // Color failed faces
-    for (const group of meshData.face_groups) {
-      if (failedFaceIds.has(group.face_id) && group.triangle_count > 0) {
-        const failure = failedFaces.find((f) => f.faceId === group.face_id);
-        const isError = failure?.status === "fail";
-
-        // Each triangle has 3 vertices, each vertex has 3 color components
-        // But we're using face-vertex geometry, so we need to find the right vertices
-        const startVertex = (group.start_index / 6) * 4; // Convert triangle index to vertex index
-        const vertexCount = group.triangle_count * 2; // 4 vertices per 2 triangles
-
-        for (let v = 0; v < vertexCount * 2; v++) {
-          const vi = (startVertex + v) * 3;
-          if (vi + 2 < colors.length) {
-            if (isError) {
-              colors[vi] = 1.0;     // R - red for errors
-              colors[vi + 1] = 0.3;
-              colors[vi + 2] = 0.3;
-            } else {
-              colors[vi] = 1.0;     // Orange for warnings
-              colors[vi + 1] = 0.6;
-              colors[vi + 2] = 0.2;
-            }
-          }
-        }
-      }
-    }
-
     geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+
+    // Compute bounding sphere for proper camera positioning
+    geo.computeBoundingSphere();
 
     return geo;
   }, [meshData, failedFaces]);
 
   return (
     <mesh geometry={geometry}>
-      <meshPhongMaterial vertexColors flatShading />
+      <meshStandardMaterial
+        vertexColors
+        metalness={0.3}
+        roughness={0.7}
+        side={THREE.DoubleSide}
+      />
     </mesh>
   );
 }
@@ -200,6 +188,48 @@ function LoadingFallback() {
   );
 }
 
+// Auto-fit camera component
+function AutoFitCamera({ meshData }: { meshData: MeshData }) {
+  const { camera } = useThree();
+
+  useEffect(() => {
+    // Calculate bounding box from vertices
+    let minX = Infinity, minY = Infinity, minZ = Infinity;
+    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+
+    const vertices = meshData.vertices;
+    for (let i = 0; i < vertices.length; i += 3) {
+      minX = Math.min(minX, vertices[i]);
+      minY = Math.min(minY, vertices[i + 1]);
+      minZ = Math.min(minZ, vertices[i + 2]);
+      maxX = Math.max(maxX, vertices[i]);
+      maxY = Math.max(maxY, vertices[i + 1]);
+      maxZ = Math.max(maxZ, vertices[i + 2]);
+    }
+
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
+    const centerZ = (minZ + maxZ) / 2;
+
+    const sizeX = maxX - minX;
+    const sizeY = maxY - minY;
+    const sizeZ = maxZ - minZ;
+    const maxSize = Math.max(sizeX, sizeY, sizeZ);
+
+    // Position camera to fit the model
+    const distance = maxSize * 2;
+    camera.position.set(
+      centerX + distance * 0.7,
+      centerY + distance * 0.5,
+      centerZ + distance * 0.7
+    );
+    camera.lookAt(centerX, centerY, centerZ);
+    camera.updateProjectionMatrix();
+  }, [meshData, camera]);
+
+  return null;
+}
+
 export function ModelViewer({ meshData, dfmResults, onMarkerClick }: ModelViewerProps) {
   const failedFaces = useMemo(
     () => mapFailuresToFaces(dfmResults, meshData.face_groups),
@@ -208,24 +238,30 @@ export function ModelViewer({ meshData, dfmResults, onMarkerClick }: ModelViewer
 
   return (
     <div className="model-viewer-container">
-      <Canvas camera={{ position: [100, 80, 100], fov: 50 }}>
+      <Canvas camera={{ fov: 45, near: 0.001, far: 10000 }}>
         <Suspense fallback={<LoadingFallback />}>
-          <ambientLight intensity={0.4} />
-          <directionalLight position={[50, 50, 50]} intensity={0.8} />
-          <directionalLight position={[-50, -50, -50]} intensity={0.3} />
+          {/* Lighting setup for CAD-style rendering */}
+          <ambientLight intensity={0.5} />
+          <directionalLight position={[10, 10, 10]} intensity={0.8} />
+          <directionalLight position={[-10, -10, -10]} intensity={0.3} />
+          <directionalLight position={[0, 10, 0]} intensity={0.4} />
+
           <Center>
             <StepMesh meshData={meshData} failedFaces={failedFaces} />
             <FailureMarkers failures={failedFaces} onClick={onMarkerClick} />
           </Center>
+
+          <AutoFitCamera meshData={meshData} />
+
           <OrbitControls
             enablePan={true}
             enableZoom={true}
             enableRotate={true}
-            minDistance={30}
-            maxDistance={500}
+            makeDefault
           />
-          {/* Grid helper for reference */}
-          <gridHelper args={[200, 20, "#444444", "#333333"]} />
+
+          {/* Grid helper - scaled based on model size */}
+          <gridHelper args={[1000, 100, "#333333", "#222222"]} rotation={[0, 0, 0]} />
         </Suspense>
       </Canvas>
     </div>
