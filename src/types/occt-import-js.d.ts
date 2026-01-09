@@ -1,5 +1,13 @@
 declare module 'occt-import-js' {
+  interface BrepFace {
+    first: number;  // First triangle index
+    last: number;   // Last triangle index
+    color?: [number, number, number];  // RGB color if available
+  }
+
   interface OcctMesh {
+    name?: string;
+    color?: [number, number, number];
     attributes: {
       position: {
         array: number[];
@@ -11,6 +19,7 @@ declare module 'occt-import-js' {
     index?: {
       array: number[];
     };
+    brep_faces?: BrepFace[];  // B-rep face boundaries
   }
 
   interface OcctResult {

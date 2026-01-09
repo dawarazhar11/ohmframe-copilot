@@ -237,27 +237,28 @@ function App() {
           const occtMesh = await loadStepToMesh(fileContent);
           console.log("[App] OCCT mesh result:", occtMesh);
           if (occtMesh && occtMesh.vertices.length > 0) {
-            // Convert OCCT mesh to our MeshData format
+            // Convert OCCT mesh to our MeshData format with proper face groups
             const meshData: MeshData = {
               vertices: occtMesh.vertices,
               indices: occtMesh.indices,
               normals: occtMesh.normals,
-              face_groups: [{
-                face_id: 0,
-                face_type: "solid",
-                start_index: 0,
-                triangle_count: occtMesh.indices.length / 3,
-                center: [
-                  (occtMesh.boundingBox.min[0] + occtMesh.boundingBox.max[0]) / 2,
-                  (occtMesh.boundingBox.min[1] + occtMesh.boundingBox.max[1]) / 2,
-                  (occtMesh.boundingBox.min[2] + occtMesh.boundingBox.max[2]) / 2,
-                ],
-              }],
+              face_groups: occtMesh.faceGroups.map(fg => ({
+                face_id: fg.face_id,
+                face_type: fg.face_type,
+                start_index: fg.start_index,
+                triangle_count: fg.triangle_count,
+                center: fg.center,
+              })),
             };
             console.log("[App] Setting mesh data from frontend loader:", {
               vertexCount: meshData.vertices.length / 3,
               indexCount: meshData.indices.length,
               triangleCount: meshData.indices.length / 3,
+              faceGroupCount: meshData.face_groups.length,
+              faceTypes: meshData.face_groups.reduce((acc, fg) => {
+                acc[fg.face_type] = (acc[fg.face_type] || 0) + 1;
+                return acc;
+              }, {} as Record<string, number>),
             });
             setMeshData(meshData);
           } else {

@@ -83,11 +83,21 @@ async function initOcct(): Promise<any> {
   return initPromise;
 }
 
+export interface OcctFaceGroup {
+  face_id: number;
+  face_type: string;  // "planar", "cylindrical", "curved"
+  start_index: number;
+  triangle_count: number;
+  center: [number, number, number];
+  color?: [number, number, number];
+}
+
 export interface OcctMeshData {
   vertices: number[];
   indices: number[];
   normals: number[];
   faceCount: number;
+  faceGroups: OcctFaceGroup[];
   boundingBox: {
     min: [number, number, number];
     max: [number, number, number];
@@ -120,11 +130,14 @@ export async function loadStepToMesh(stepContent: string): Promise<OcctMeshData 
       return null;
     }
 
-    // Combine all meshes
+    // Combine all meshes and extract face groups
     const allVertices: number[] = [];
     const allIndices: number[] = [];
     const allNormals: number[] = [];
+    const allFaceGroups: OcctFaceGroup[] = [];
     let vertexOffset = 0;
+    let indexOffset = 0;
+    let faceIdCounter = 0;
 
     // Track bounding box
     let minX = Infinity, minY = Infinity, minZ = Infinity;
@@ -135,6 +148,9 @@ export async function loadStepToMesh(stepContent: string): Promise<OcctMeshData 
       const meshVertices = mesh.attributes.position.array;
       const meshNormals = mesh.attributes.normal?.array || [];
       const meshIndices = mesh.index?.array || [];
+      const brepFaces = mesh.brep_faces || [];
+
+      console.log("[stepLoader] Processing mesh with", brepFaces.length, "B-rep faces");
 
       // Add vertices and update bounding box
       for (let i = 0; i < meshVertices.length; i += 3) {
@@ -156,7 +172,6 @@ export async function loadStepToMesh(stepContent: string): Promise<OcctMeshData 
       if (meshNormals.length > 0) {
         allNormals.push(...meshNormals);
       } else {
-        // Generate default normals (will be computed later)
         for (let i = 0; i < meshVertices.length; i += 3) {
           allNormals.push(0, 0, 1);
         }
@@ -167,7 +182,65 @@ export async function loadStepToMesh(stepContent: string): Promise<OcctMeshData 
         allIndices.push(idx + vertexOffset);
       }
 
+      // Extract face groups from brep_faces
+      for (const brepFace of brepFaces) {
+        const firstTriIdx = brepFace.first;
+        const lastTriIdx = brepFace.last;
+        const triangleCount = lastTriIdx - firstTriIdx + 1;
+
+        // Calculate face center by averaging triangle centroids
+        let centerX = 0, centerY = 0, centerZ = 0;
+        let triCount = 0;
+
+        for (let t = firstTriIdx; t <= lastTriIdx && t * 3 + 2 < meshIndices.length; t++) {
+          const i0 = meshIndices[t * 3] * 3;
+          const i1 = meshIndices[t * 3 + 1] * 3;
+          const i2 = meshIndices[t * 3 + 2] * 3;
+
+          if (i0 + 2 < meshVertices.length && i1 + 2 < meshVertices.length && i2 + 2 < meshVertices.length) {
+            centerX += (meshVertices[i0] + meshVertices[i1] + meshVertices[i2]) / 3;
+            centerY += (meshVertices[i0 + 1] + meshVertices[i1 + 1] + meshVertices[i2 + 1]) / 3;
+            centerZ += (meshVertices[i0 + 2] + meshVertices[i1 + 2] + meshVertices[i2 + 2]) / 3;
+            triCount++;
+          }
+        }
+
+        if (triCount > 0) {
+          centerX /= triCount;
+          centerY /= triCount;
+          centerZ /= triCount;
+        }
+
+        // Determine face type by analyzing normals
+        const faceType = determineFaceType(meshVertices, meshNormals, meshIndices, firstTriIdx, lastTriIdx);
+
+        allFaceGroups.push({
+          face_id: faceIdCounter++,
+          face_type: faceType,
+          start_index: indexOffset + firstTriIdx * 3,
+          triangle_count: triangleCount,
+          center: [centerX, centerY, centerZ],
+          color: brepFace.color || undefined,
+        });
+      }
+
+      // If no brep_faces, create a single face group for the entire mesh
+      if (brepFaces.length === 0 && meshIndices.length > 0) {
+        const centerX = (minX + maxX) / 2;
+        const centerY = (minY + maxY) / 2;
+        const centerZ = (minZ + maxZ) / 2;
+
+        allFaceGroups.push({
+          face_id: faceIdCounter++,
+          face_type: "solid",
+          start_index: indexOffset,
+          triangle_count: meshIndices.length / 3,
+          center: [centerX, centerY, centerZ],
+        });
+      }
+
       vertexOffset += meshVertices.length / 3;
+      indexOffset += meshIndices.length;
     }
 
     // Compute proper normals if needed
@@ -180,6 +253,7 @@ export async function loadStepToMesh(stepContent: string): Promise<OcctMeshData 
       indices: allIndices,
       normals: allNormals,
       faceCount: result.meshes.length,
+      faceGroups: allFaceGroups,
       boundingBox: {
         min: [minX, minY, minZ] as [number, number, number],
         max: [maxX, maxY, maxZ] as [number, number, number]
@@ -191,6 +265,7 @@ export async function loadStepToMesh(stepContent: string): Promise<OcctMeshData 
       indexCount: allIndices.length,
       triangleCount: allIndices.length / 3,
       normalCount: allNormals.length / 3,
+      faceGroupCount: allFaceGroups.length,
       boundingBox: meshData.boundingBox
     });
 
@@ -198,6 +273,73 @@ export async function loadStepToMesh(stepContent: string): Promise<OcctMeshData 
   } catch (error) {
     console.error("[stepLoader] Error loading STEP file:", error);
     return null;
+  }
+}
+
+// Determine face type by analyzing normal variation
+function determineFaceType(
+  _vertices: number[],
+  normals: number[],
+  indices: number[],
+  firstTriIdx: number,
+  lastTriIdx: number
+): string {
+  if (normals.length === 0) return "unknown";
+
+  // Collect normals for this face
+  const faceNormals: [number, number, number][] = [];
+
+  for (let t = firstTriIdx; t <= lastTriIdx && t * 3 + 2 < indices.length; t++) {
+    const i0 = indices[t * 3] * 3;
+    const i1 = indices[t * 3 + 1] * 3;
+    const i2 = indices[t * 3 + 2] * 3;
+
+    // Get normals for each vertex of the triangle
+    if (i0 + 2 < normals.length) {
+      faceNormals.push([normals[i0], normals[i0 + 1], normals[i0 + 2]]);
+    }
+    if (i1 + 2 < normals.length) {
+      faceNormals.push([normals[i1], normals[i1 + 1], normals[i1 + 2]]);
+    }
+    if (i2 + 2 < normals.length) {
+      faceNormals.push([normals[i2], normals[i2 + 1], normals[i2 + 2]]);
+    }
+  }
+
+  if (faceNormals.length < 3) return "unknown";
+
+  // Calculate normal variance
+  let avgNx = 0, avgNy = 0, avgNz = 0;
+  for (const n of faceNormals) {
+    avgNx += n[0];
+    avgNy += n[1];
+    avgNz += n[2];
+  }
+  avgNx /= faceNormals.length;
+  avgNy /= faceNormals.length;
+  avgNz /= faceNormals.length;
+
+  // Calculate variance from average
+  let variance = 0;
+  for (const n of faceNormals) {
+    const dx = n[0] - avgNx;
+    const dy = n[1] - avgNy;
+    const dz = n[2] - avgNz;
+    variance += dx * dx + dy * dy + dz * dz;
+  }
+  variance /= faceNormals.length;
+
+  // Low variance = planar face
+  // Medium variance = cylindrical (normals vary in one direction)
+  // High variance = curved/spherical
+  if (variance < 0.01) {
+    return "planar";
+  } else if (variance < 0.5) {
+    // Check if it's cylindrical by seeing if normals lie roughly on a plane
+    // (i.e., they vary in 2D but not 3D)
+    return "cylindrical";
+  } else {
+    return "curved";
   }
 }
 
