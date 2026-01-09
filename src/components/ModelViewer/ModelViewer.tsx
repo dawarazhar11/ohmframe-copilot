@@ -1,4 +1,4 @@
-import { Suspense, useMemo, useEffect } from "react";
+import { Suspense, useMemo, useEffect, useState } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls, Center, Html } from "@react-three/drei";
 import * as THREE from "three";
@@ -120,6 +120,147 @@ function StepMesh({
   );
 }
 
+// Single marker component with hover state
+function Marker({
+  failure,
+  onClick,
+}: {
+  failure: FailedFace;
+  onClick?: (ruleId: string) => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const rule = getRuleById(failure.ruleId);
+  const isError = failure.status === "fail";
+  const color = isError ? "#ff4444" : "#f5a623";
+
+  return (
+    <group position={failure.center}>
+      {/* Larger sphere marker */}
+      <mesh
+        onClick={() => onClick?.(failure.ruleId)}
+        onPointerOver={() => setHovered(true)}
+        onPointerOut={() => setHovered(false)}
+      >
+        <sphereGeometry args={[hovered ? 8 : 6, 32, 32]} />
+        <meshBasicMaterial
+          color={hovered ? "#ffffff" : color}
+          transparent
+          opacity={hovered ? 1 : 0.9}
+        />
+      </mesh>
+
+      {/* Outer ring for visibility */}
+      <mesh rotation={[Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[7, 10, 32]} />
+        <meshBasicMaterial
+          color={color}
+          transparent
+          opacity={0.6}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+
+      {/* Always visible label */}
+      <Html center distanceFactor={10} style={{ pointerEvents: "none" }}>
+        <div
+          style={{
+            background: color,
+            color: "white",
+            padding: "4px 10px",
+            borderRadius: "6px",
+            fontSize: "14px",
+            fontWeight: "bold",
+            whiteSpace: "nowrap",
+            fontFamily: "monospace",
+            boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+            border: "2px solid white",
+          }}
+        >
+          {failure.ruleId}
+        </div>
+      </Html>
+
+      {/* Hover popup with details */}
+      {hovered && rule && (
+        <Html center distanceFactor={8} style={{ pointerEvents: "none" }}>
+          <div
+            style={{
+              background: "rgba(20, 20, 30, 0.95)",
+              color: "white",
+              padding: "12px 16px",
+              borderRadius: "8px",
+              fontSize: "13px",
+              fontFamily: "system-ui, sans-serif",
+              minWidth: "200px",
+              maxWidth: "280px",
+              boxShadow: "0 4px 20px rgba(0,0,0,0.5)",
+              border: `2px solid ${color}`,
+              marginTop: "-80px",
+            }}
+          >
+            <div style={{
+              fontWeight: "bold",
+              fontSize: "15px",
+              marginBottom: "8px",
+              color: color,
+            }}>
+              {failure.ruleId}
+            </div>
+            <div style={{ marginBottom: "6px", fontWeight: "500" }}>
+              {rule.name}
+            </div>
+            <div style={{
+              fontSize: "12px",
+              color: "#aaa",
+              marginBottom: "8px",
+              lineHeight: "1.4",
+            }}>
+              {rule.description}
+            </div>
+            <div style={{
+              display: "flex",
+              gap: "8px",
+              fontSize: "11px",
+              flexWrap: "wrap",
+            }}>
+              <span style={{
+                background: isError ? "#ff4444" : "#f5a623",
+                padding: "2px 8px",
+                borderRadius: "4px",
+                fontWeight: "bold",
+              }}>
+                {isError ? "FAIL" : "WARNING"}
+              </span>
+              <span style={{
+                background: "#444",
+                padding: "2px 8px",
+                borderRadius: "4px"
+              }}>
+                {rule.category}
+              </span>
+              <span style={{
+                background: "#333",
+                padding: "2px 8px",
+                borderRadius: "4px"
+              }}>
+                {failure.faceType}
+              </span>
+            </div>
+            <div style={{
+              fontSize: "10px",
+              color: "#666",
+              marginTop: "8px",
+              textAlign: "center",
+            }}>
+              Click to view details
+            </div>
+          </div>
+        </Html>
+      )}
+    </group>
+  );
+}
+
 // Failure markers component
 function FailureMarkers({
   failures,
@@ -140,41 +281,13 @@ function FailureMarkers({
 
   return (
     <group>
-      {uniqueFailures.map((failure, idx) => {
-        const isError = failure.status === "fail";
-        const color = isError ? "#ff4444" : "#d4a574";
-
-        return (
-          <group key={`${failure.ruleId}-${idx}`} position={failure.center}>
-            {/* Pulsing sphere marker */}
-            <mesh onClick={() => onClick?.(failure.ruleId)}>
-              <sphereGeometry args={[3, 16, 16]} />
-              <meshBasicMaterial
-                color={color}
-                transparent
-                opacity={0.85}
-              />
-            </mesh>
-            {/* Rule ID label */}
-            <Html center distanceFactor={15} style={{ pointerEvents: "none" }}>
-              <div
-                style={{
-                  background: color,
-                  color: "white",
-                  padding: "2px 6px",
-                  borderRadius: "4px",
-                  fontSize: "10px",
-                  fontWeight: "bold",
-                  whiteSpace: "nowrap",
-                  fontFamily: "monospace",
-                }}
-              >
-                {failure.ruleId}
-              </div>
-            </Html>
-          </group>
-        );
-      })}
+      {uniqueFailures.map((failure, idx) => (
+        <Marker
+          key={`${failure.ruleId}-${idx}`}
+          failure={failure}
+          onClick={onClick}
+        />
+      ))}
     </group>
   );
 }
