@@ -20,6 +20,7 @@ interface MarkerData extends Omit<FailedFace, 'status'> {
 }
 
 // Map DFM results to face groups (including passes)
+// Uses improved feature type classification: hole, bend, fillet, slot, etc.
 function mapResultsToFaces(
   dfmResults: DfmRuleResult[] | undefined,
   faceGroups: FaceGroup[]
@@ -27,7 +28,6 @@ function mapResultsToFaces(
   if (!dfmResults || dfmResults.length === 0) return [];
 
   const markerData: MarkerData[] = [];
-  let faceIndex = 0;
 
   for (const result of dfmResults) {
     // Skip N/A results
@@ -36,29 +36,69 @@ function mapResultsToFaces(
     const rule = getRuleById(result.ruleId);
     if (!rule) continue;
 
-    // Match rule category to face types
+    // Match rule category to specific feature types
     let matchingFaces: FaceGroup[] = [];
+    const ruleName = rule.name.toLowerCase();
+    const ruleCategory = rule.category;
 
-    if (rule.category === "Holes" || rule.name.toLowerCase().includes("hole")) {
-      matchingFaces = faceGroups.filter((g) => g.face_type === "cylindrical");
-    } else if (rule.category === "Bending") {
-      matchingFaces = faceGroups.filter((g) => g.face_type === "planar").slice(0, 2);
-    } else if (rule.category === "Walls" || rule.name.toLowerCase().includes("wall")) {
-      matchingFaces = faceGroups.filter((g) => g.face_type === "planar").slice(0, 1);
-    } else {
-      // Distribute other rules across available faces
-      if (faceGroups.length > 0) {
-        matchingFaces = [faceGroups[faceIndex % faceGroups.length]];
-        faceIndex++;
+    // HOLE rules → match actual holes (not bends or fillets)
+    if (ruleCategory === "Holes" || ruleName.includes("hole")) {
+      // First try to find actual holes
+      matchingFaces = faceGroups.filter((g) => g.face_type === "hole");
+      // If no holes found, try slots (elongated holes)
+      if (matchingFaces.length === 0) {
+        matchingFaces = faceGroups.filter((g) => g.face_type === "slot");
+      }
+      // Last resort: generic cylindrical
+      if (matchingFaces.length === 0) {
+        matchingFaces = faceGroups.filter((g) => g.face_type === "cylindrical");
       }
     }
+    // BENDING rules → match bends specifically
+    else if (ruleCategory === "Bending" || ruleName.includes("bend")) {
+      matchingFaces = faceGroups.filter((g) => g.face_type === "bend");
+      // If no bends found, this might be a flat part - show on planar face
+      if (matchingFaces.length === 0) {
+        matchingFaces = faceGroups.filter((g) => g.face_type === "planar").slice(0, 1);
+      }
+    }
+    // WALL rules → match planar faces
+    else if (ruleCategory === "Walls" || ruleName.includes("wall") || ruleName.includes("thickness")) {
+      matchingFaces = faceGroups.filter((g) => g.face_type === "planar").slice(0, 1);
+    }
+    // FILLET rules → match fillets
+    else if (ruleName.includes("fillet") || ruleName.includes("radius") || ruleName.includes("corner")) {
+      matchingFaces = faceGroups.filter((g) => g.face_type === "fillet" || g.face_type === "round");
+    }
+    // SLOT rules → match slots
+    else if (ruleName.includes("slot")) {
+      matchingFaces = faceGroups.filter((g) => g.face_type === "slot");
+    }
+    // FEATURE rules → try to match based on feature type
+    else if (ruleCategory === "Features") {
+      // Features could be various types - try fillets, rounds, then cylindrical
+      matchingFaces = faceGroups.filter((g) =>
+        g.face_type === "fillet" ||
+        g.face_type === "round" ||
+        g.face_type === "slot"
+      );
+      if (matchingFaces.length === 0) {
+        matchingFaces = faceGroups.filter((g) => g.face_type === "cylindrical");
+      }
+    }
+    // Default: distribute across planar faces (most common)
+    else {
+      matchingFaces = faceGroups.filter((g) => g.face_type === "planar").slice(0, 1);
+    }
 
-    // If no matching faces, use center of model
+    // If still no matches, use first available face
     if (matchingFaces.length === 0 && faceGroups.length > 0) {
       matchingFaces = [faceGroups[0]];
     }
 
-    for (const face of matchingFaces) {
+    // Only add one marker per rule (use first matching face)
+    if (matchingFaces.length > 0) {
+      const face = matchingFaces[0];
       markerData.push({
         ruleId: result.ruleId,
         faceId: face.face_id,

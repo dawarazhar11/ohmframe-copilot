@@ -152,7 +152,24 @@ export async function loadStepToMesh(stepContent: string): Promise<OcctMeshData 
 
       console.log("[stepLoader] Processing mesh with", brepFaces.length, "B-rep faces");
 
-      // Add vertices and update bounding box
+      // Calculate mesh bounding box first (needed for face classification)
+      let meshMinX = Infinity, meshMinY = Infinity, meshMinZ = Infinity;
+      let meshMaxX = -Infinity, meshMaxY = -Infinity, meshMaxZ = -Infinity;
+      for (let i = 0; i < meshVertices.length; i += 3) {
+        meshMinX = Math.min(meshMinX, meshVertices[i]);
+        meshMinY = Math.min(meshMinY, meshVertices[i + 1]);
+        meshMinZ = Math.min(meshMinZ, meshVertices[i + 2]);
+        meshMaxX = Math.max(meshMaxX, meshVertices[i]);
+        meshMaxY = Math.max(meshMaxY, meshVertices[i + 1]);
+        meshMaxZ = Math.max(meshMaxZ, meshVertices[i + 2]);
+      }
+      const meshBoundingSize = Math.max(
+        meshMaxX - meshMinX,
+        meshMaxY - meshMinY,
+        meshMaxZ - meshMinZ
+      ) || 100;
+
+      // Add vertices and update global bounding box
       for (let i = 0; i < meshVertices.length; i += 3) {
         const x = meshVertices[i];
         const y = meshVertices[i + 1];
@@ -211,8 +228,8 @@ export async function loadStepToMesh(stepContent: string): Promise<OcctMeshData 
           centerZ /= triCount;
         }
 
-        // Determine face type by analyzing normals
-        const faceType = determineFaceType(meshVertices, meshNormals, meshIndices, firstTriIdx, lastTriIdx);
+        // Determine face type by analyzing normals and geometry
+        const faceType = determineFaceType(meshVertices, meshNormals, meshIndices, firstTriIdx, lastTriIdx, meshBoundingSize);
 
         allFaceGroups.push({
           face_id: faceIdCounter++,
@@ -276,14 +293,186 @@ export async function loadStepToMesh(stepContent: string): Promise<OcctMeshData 
   }
 }
 
-// Determine face type by analyzing normal variation
-function determineFaceType(
-  _vertices: number[],
+// Feature type definitions for DFM
+export type FeatureType =
+  | "planar"      // Flat surface
+  | "hole"        // Through or blind hole (full cylinder, normals point inward)
+  | "bend"        // Bend radius (partial cylinder ~90°, connects planar faces)
+  | "fillet"      // Internal corner radius (small, concave)
+  | "round"       // External corner radius (small, convex)
+  | "slot"        // Elongated opening (aspect ratio > 2:1)
+  | "cutout"      // Non-circular internal removal
+  | "cylindrical" // Generic cylindrical (when can't determine specific type)
+  | "curved"      // Complex curved surface
+  | "unknown";
+
+// Analyze cylindrical face to determine specific feature type
+function classifyCylindricalFeature(
+  vertices: number[],
   normals: number[],
   indices: number[],
   firstTriIdx: number,
+  lastTriIdx: number,
+  faceArea: number,
+  boundingSize: number
+): FeatureType {
+  if (normals.length === 0) return "cylindrical";
+
+  // Collect normals and vertices for this face
+  const faceNormals: [number, number, number][] = [];
+  const faceVertices: [number, number, number][] = [];
+
+  for (let t = firstTriIdx; t <= lastTriIdx && t * 3 + 2 < indices.length; t++) {
+    const i0 = indices[t * 3];
+    const i1 = indices[t * 3 + 1];
+    const i2 = indices[t * 3 + 2];
+
+    for (const idx of [i0, i1, i2]) {
+      const vi = idx * 3;
+      const ni = idx * 3;
+      if (vi + 2 < vertices.length) {
+        faceVertices.push([vertices[vi], vertices[vi + 1], vertices[vi + 2]]);
+      }
+      if (ni + 2 < normals.length) {
+        faceNormals.push([normals[ni], normals[ni + 1], normals[ni + 2]]);
+      }
+    }
+  }
+
+  if (faceNormals.length < 6) return "cylindrical";
+
+  // Calculate angular spread of normals (how much of the cylinder is covered)
+  // Project normals onto a plane perpendicular to the cylinder axis
+
+  // First, estimate cylinder axis by finding the direction with least normal variation
+  // For a cylinder, normals are perpendicular to the axis
+  const avgNormal = [0, 0, 0];
+  for (const n of faceNormals) {
+    avgNormal[0] += n[0];
+    avgNormal[1] += n[1];
+    avgNormal[2] += n[2];
+  }
+  avgNormal[0] /= faceNormals.length;
+  avgNormal[1] /= faceNormals.length;
+  avgNormal[2] /= faceNormals.length;
+
+  // Calculate the angular spread of normals
+  let minDot = 1, maxDot = -1;
+  for (let i = 0; i < faceNormals.length; i++) {
+    for (let j = i + 1; j < faceNormals.length; j++) {
+      const dot = faceNormals[i][0] * faceNormals[j][0] +
+                  faceNormals[i][1] * faceNormals[j][1] +
+                  faceNormals[i][2] * faceNormals[j][2];
+      minDot = Math.min(minDot, dot);
+      maxDot = Math.max(maxDot, dot);
+    }
+  }
+
+  // Angular spread in radians (approximate)
+  const angularSpread = Math.acos(Math.max(-1, Math.min(1, minDot)));
+  const angularSpreadDegrees = angularSpread * 180 / Math.PI;
+
+  // Calculate face dimensions for aspect ratio
+  let minX = Infinity, maxX = -Infinity;
+  let minY = Infinity, maxY = -Infinity;
+  let minZ = Infinity, maxZ = -Infinity;
+  for (const v of faceVertices) {
+    minX = Math.min(minX, v[0]); maxX = Math.max(maxX, v[0]);
+    minY = Math.min(minY, v[1]); maxY = Math.max(maxY, v[1]);
+    minZ = Math.min(minZ, v[2]); maxZ = Math.max(maxZ, v[2]);
+  }
+  const dimX = maxX - minX;
+  const dimY = maxY - minY;
+  const dimZ = maxZ - minZ;
+  const dims = [dimX, dimY, dimZ].sort((a, b) => b - a);
+  const aspectRatio = dims[0] / (dims[1] || 0.001);
+
+  // Estimate radius from face area and angular spread
+  // For a cylindrical segment: area ≈ 2πr * h * (angle/2π) = r * h * angle
+  const height = dims[0]; // Longest dimension is likely height
+  const estimatedRadius = faceArea / (height * angularSpread || 1);
+  const relativeRadius = estimatedRadius / boundingSize;
+
+  // Classification logic:
+
+  // HOLE: Full or nearly full cylinder (angular spread > 300°)
+  // Typically small relative to part size
+  if (angularSpreadDegrees > 300) {
+    return "hole";
+  }
+
+  // SLOT: Elongated hole (high aspect ratio, significant angular spread)
+  if (angularSpreadDegrees > 200 && aspectRatio > 2.5) {
+    return "slot";
+  }
+
+  // BEND: Partial cylinder (60-120°), medium size
+  // Bends typically cover about 90° and are larger features
+  if (angularSpreadDegrees >= 60 && angularSpreadDegrees <= 150 && relativeRadius > 0.02) {
+    return "bend";
+  }
+
+  // FILLET/ROUND: Small radius (< 5% of bounding), partial cylinder
+  if (relativeRadius < 0.05 && angularSpreadDegrees < 120) {
+    // Small radius feature - classify based on size
+    // Fillets are typically very small (< 2% of bounding), rounds are slightly larger
+    const normalMag = Math.sqrt(avgNormal[0]**2 + avgNormal[1]**2 + avgNormal[2]**2);
+    if (normalMag > 0.1) {
+      return relativeRadius < 0.02 ? "fillet" : "round";
+    }
+  }
+
+  // Default: generic cylindrical
+  return "cylindrical";
+}
+
+// Calculate approximate face area from triangles
+function calculateFaceArea(
+  vertices: number[],
+  indices: number[],
+  firstTriIdx: number,
   lastTriIdx: number
-): string {
+): number {
+  let area = 0;
+
+  for (let t = firstTriIdx; t <= lastTriIdx && t * 3 + 2 < indices.length; t++) {
+    const i0 = indices[t * 3] * 3;
+    const i1 = indices[t * 3 + 1] * 3;
+    const i2 = indices[t * 3 + 2] * 3;
+
+    if (i0 + 2 >= vertices.length || i1 + 2 >= vertices.length || i2 + 2 >= vertices.length) {
+      continue;
+    }
+
+    // Triangle vertices
+    const v0 = [vertices[i0], vertices[i0 + 1], vertices[i0 + 2]];
+    const v1 = [vertices[i1], vertices[i1 + 1], vertices[i1 + 2]];
+    const v2 = [vertices[i2], vertices[i2 + 1], vertices[i2 + 2]];
+
+    // Cross product for area
+    const e1 = [v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2]];
+    const e2 = [v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2]];
+    const cross = [
+      e1[1] * e2[2] - e1[2] * e2[1],
+      e1[2] * e2[0] - e1[0] * e2[2],
+      e1[0] * e2[1] - e1[1] * e2[0]
+    ];
+    const triArea = 0.5 * Math.sqrt(cross[0]**2 + cross[1]**2 + cross[2]**2);
+    area += triArea;
+  }
+
+  return area;
+}
+
+// Determine face type by analyzing normal variation and geometry
+function determineFaceType(
+  vertices: number[],
+  normals: number[],
+  indices: number[],
+  firstTriIdx: number,
+  lastTriIdx: number,
+  boundingSize: number = 100
+): FeatureType {
   if (normals.length === 0) return "unknown";
 
   // Collect normals for this face
@@ -294,7 +483,6 @@ function determineFaceType(
     const i1 = indices[t * 3 + 1] * 3;
     const i2 = indices[t * 3 + 2] * 3;
 
-    // Get normals for each vertex of the triangle
     if (i0 + 2 < normals.length) {
       faceNormals.push([normals[i0], normals[i0 + 1], normals[i0 + 2]]);
     }
@@ -319,7 +507,6 @@ function determineFaceType(
   avgNy /= faceNormals.length;
   avgNz /= faceNormals.length;
 
-  // Calculate variance from average
   let variance = 0;
   for (const n of faceNormals) {
     const dx = n[0] - avgNx;
@@ -330,17 +517,22 @@ function determineFaceType(
   variance /= faceNormals.length;
 
   // Low variance = planar face
-  // Medium variance = cylindrical (normals vary in one direction)
-  // High variance = curved/spherical
   if (variance < 0.01) {
     return "planar";
-  } else if (variance < 0.5) {
-    // Check if it's cylindrical by seeing if normals lie roughly on a plane
-    // (i.e., they vary in 2D but not 3D)
-    return "cylindrical";
-  } else {
-    return "curved";
   }
+
+  // Medium variance = cylindrical - need further classification
+  if (variance < 0.5) {
+    const faceArea = calculateFaceArea(vertices, indices, firstTriIdx, lastTriIdx);
+    return classifyCylindricalFeature(
+      vertices, normals, indices,
+      firstTriIdx, lastTriIdx,
+      faceArea, boundingSize
+    );
+  }
+
+  // High variance = complex curved surface
+  return "curved";
 }
 
 // Compute vertex normals from face data
