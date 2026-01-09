@@ -9,8 +9,8 @@ use std::path::Path;
 use tauri::Manager;
 use serde::{Deserialize, Serialize};
 
-// Note: Truck crates declared in Cargo.toml for future use
-// Currently using simplified mesh generation based on STEP metadata
+// Regex for parsing STEP coordinates
+use regex::Regex;
 
 /// Result of STEP file analysis
 #[derive(Debug, Serialize, Deserialize)]
@@ -290,8 +290,111 @@ fn parse_step_mesh(content: String, filename: String) -> StepMeshResult {
     }
 }
 
-/// Generate a simple representative mesh from STEP metadata
-/// This is a placeholder - full truck-based parsing can be added later
+/// Extract 3D points from STEP file content
+fn extract_step_points(content: &str) -> Vec<[f64; 3]> {
+    let mut points = Vec::new();
+
+    // Match CARTESIAN_POINT patterns: #123=CARTESIAN_POINT('',(-1.5,2.3,4.5));
+    let point_re = Regex::new(r"CARTESIAN_POINT\s*\(\s*'[^']*'\s*,\s*\(\s*([+-]?\d+\.?\d*(?:[eE][+-]?\d+)?)\s*,\s*([+-]?\d+\.?\d*(?:[eE][+-]?\d+)?)\s*,\s*([+-]?\d+\.?\d*(?:[eE][+-]?\d+)?)\s*\)").unwrap();
+
+    for cap in point_re.captures_iter(content) {
+        if let (Ok(x), Ok(y), Ok(z)) = (
+            cap[1].parse::<f64>(),
+            cap[2].parse::<f64>(),
+            cap[3].parse::<f64>(),
+        ) {
+            points.push([x, y, z]);
+        }
+    }
+
+    points
+}
+
+/// Create a convex hull approximation mesh from points
+fn create_mesh_from_points(points: &[[f64; 3]]) -> (Vec<f32>, Vec<u32>, Vec<f32>, BoundingBox) {
+    if points.is_empty() {
+        // Return empty mesh
+        return (vec![], vec![], vec![], BoundingBox {
+            min: [0.0, 0.0, 0.0],
+            max: [0.0, 0.0, 0.0],
+            dimensions: [0.0, 0.0, 0.0],
+        });
+    }
+
+    // Calculate bounding box
+    let mut min = [f64::MAX, f64::MAX, f64::MAX];
+    let mut max = [f64::MIN, f64::MIN, f64::MIN];
+
+    for p in points {
+        min[0] = min[0].min(p[0]);
+        min[1] = min[1].min(p[1]);
+        min[2] = min[2].min(p[2]);
+        max[0] = max[0].max(p[0]);
+        max[1] = max[1].max(p[1]);
+        max[2] = max[2].max(p[2]);
+    }
+
+    let bbox = BoundingBox {
+        min,
+        max,
+        dimensions: [max[0] - min[0], max[1] - min[1], max[2] - min[2]],
+    };
+
+    // Create a box mesh based on the bounding box
+    let mut vertices: Vec<f32> = Vec::new();
+    let mut normals: Vec<f32> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+
+    // 8 corners of the bounding box
+    let corners = [
+        [min[0], min[1], min[2]], // 0
+        [max[0], min[1], min[2]], // 1
+        [max[0], max[1], min[2]], // 2
+        [min[0], max[1], min[2]], // 3
+        [min[0], min[1], max[2]], // 4
+        [max[0], min[1], max[2]], // 5
+        [max[0], max[1], max[2]], // 6
+        [min[0], max[1], max[2]], // 7
+    ];
+
+    // 6 faces of the box with their normals
+    let faces = [
+        ([0, 1, 2, 3], [0.0, 0.0, -1.0]),  // Back (-Z)
+        ([4, 7, 6, 5], [0.0, 0.0, 1.0]),   // Front (+Z)
+        ([0, 4, 5, 1], [0.0, -1.0, 0.0]),  // Bottom (-Y)
+        ([2, 6, 7, 3], [0.0, 1.0, 0.0]),   // Top (+Y)
+        ([0, 3, 7, 4], [-1.0, 0.0, 0.0]),  // Left (-X)
+        ([1, 5, 6, 2], [1.0, 0.0, 0.0]),   // Right (+X)
+    ];
+
+    let mut vertex_offset: u32 = 0;
+
+    for (face_indices, normal) in faces.iter() {
+        // Add 4 vertices for this face
+        for &vi in face_indices {
+            vertices.push(corners[vi][0] as f32);
+            vertices.push(corners[vi][1] as f32);
+            vertices.push(corners[vi][2] as f32);
+            normals.push(normal[0] as f32);
+            normals.push(normal[1] as f32);
+            normals.push(normal[2] as f32);
+        }
+
+        // Two triangles per face
+        indices.push(vertex_offset);
+        indices.push(vertex_offset + 1);
+        indices.push(vertex_offset + 2);
+        indices.push(vertex_offset);
+        indices.push(vertex_offset + 2);
+        indices.push(vertex_offset + 3);
+
+        vertex_offset += 4;
+    }
+
+    (vertices, indices, normals, bbox)
+}
+
+/// Parse STEP file and generate mesh for 3D viewer
 fn parse_step_to_mesh(content: &str) -> std::result::Result<(MeshData, BoundingBox), String> {
     // Get basic analysis first
     let basic = analyze_step_content(content.to_string(), "temp.step".to_string());
@@ -300,103 +403,84 @@ fn parse_step_to_mesh(content: &str) -> std::result::Result<(MeshData, BoundingB
         return Err("Invalid STEP file".to_string());
     }
 
-    let topology = basic.topology.ok_or("No topology found")?;
-    let features = basic.features.ok_or("No features found")?;
+    // Extract actual 3D points from the STEP file
+    let points = extract_step_points(content);
 
-    // Generate a placeholder mesh based on detected features
-    // This creates a simple box with face groups representing the detected face types
-    let mut vertices: Vec<f32> = Vec::new();
-    let mut indices: Vec<u32> = Vec::new();
-    let mut normals: Vec<f32> = Vec::new();
-    let mut face_groups: Vec<FaceGroup> = Vec::new();
+    if points.is_empty() {
+        return Err("No geometry points found in STEP file".to_string());
+    }
 
-    // Create a unit cube (will be scaled by frontend based on bounding box)
-    let size = 50.0_f32; // Base size in mm
-    let half = size / 2.0;
+    // Create mesh from extracted points
+    let (vertices, indices, normals, bbox) = create_mesh_from_points(&points);
 
-    // Define cube vertices (8 corners)
-    let cube_verts: [[f32; 3]; 8] = [
-        [-half, -half, -half], // 0
-        [ half, -half, -half], // 1
-        [ half,  half, -half], // 2
-        [-half,  half, -half], // 3
-        [-half, -half,  half], // 4
-        [ half, -half,  half], // 5
-        [ half,  half,  half], // 6
-        [-half,  half,  half], // 7
+    // Create face groups based on STEP analysis
+    let topology = basic.topology.unwrap_or(TopologyInfo {
+        num_solids: 1,
+        num_shells: 1,
+        num_faces: 6,
+        num_edges: 12,
+        num_vertices: 8,
+    });
+
+    let features = basic.features.unwrap_or(FeatureInfo {
+        cylindrical_faces: 0,
+        planar_faces: 6,
+        curved_faces: 0,
+    });
+
+    // Create face groups for the bounding box mesh
+    let mut face_groups = Vec::new();
+    let center = [
+        (bbox.min[0] + bbox.max[0]) / 2.0,
+        (bbox.min[1] + bbox.max[1]) / 2.0,
+        (bbox.min[2] + bbox.max[2]) / 2.0,
     ];
 
-    // Define 6 faces with their normals (each face = 2 triangles = 4 vertices)
-    let face_defs: [([usize; 4], [f32; 3], &str); 6] = [
-        ([0, 1, 2, 3], [ 0.0,  0.0, -1.0], "planar"),  // Back
-        ([4, 7, 6, 5], [ 0.0,  0.0,  1.0], "planar"),  // Front
-        ([0, 4, 5, 1], [ 0.0, -1.0,  0.0], "planar"),  // Bottom
-        ([2, 6, 7, 3], [ 0.0,  1.0,  0.0], "planar"),  // Top
-        ([0, 3, 7, 4], [-1.0,  0.0,  0.0], "planar"),  // Left
-        ([1, 5, 6, 2], [ 1.0,  0.0,  0.0], "planar"),  // Right
+    // Map the 6 box faces to actual STEP face data
+    let face_offsets = [
+        [0.0, 0.0, bbox.min[2]],  // Back
+        [0.0, 0.0, bbox.max[2]],  // Front
+        [0.0, bbox.min[1], 0.0],  // Bottom
+        [0.0, bbox.max[1], 0.0],  // Top
+        [bbox.min[0], 0.0, 0.0],  // Left
+        [bbox.max[0], 0.0, 0.0],  // Right
     ];
 
-    let mut vertex_offset: u32 = 0;
-    let mut face_id: u32 = 0;
-
-    for (face_indices, normal, face_type) in face_defs.iter() {
-        let start_index = indices.len() as u32;
-
-        // Add 4 vertices for this face (duplicated for flat shading)
-        for &vi in face_indices {
-            vertices.extend_from_slice(&cube_verts[vi]);
-            normals.extend_from_slice(normal);
-        }
-
-        // Add 2 triangles (6 indices)
-        indices.push(vertex_offset);
-        indices.push(vertex_offset + 1);
-        indices.push(vertex_offset + 2);
-        indices.push(vertex_offset);
-        indices.push(vertex_offset + 2);
-        indices.push(vertex_offset + 3);
-
-        // Calculate face center
-        let center: [f64; 3] = [
-            (cube_verts[face_indices[0]][0] + cube_verts[face_indices[2]][0]) as f64 / 2.0,
-            (cube_verts[face_indices[0]][1] + cube_verts[face_indices[2]][1]) as f64 / 2.0,
-            (cube_verts[face_indices[0]][2] + cube_verts[face_indices[2]][2]) as f64 / 2.0,
+    for (i, offset) in face_offsets.iter().enumerate() {
+        let face_center = [
+            center[0] + offset[0] * 0.5,
+            center[1] + offset[1] * 0.5,
+            center[2] + offset[2] * 0.5,
         ];
 
-        // Assign face type based on STEP features detected
-        let detected_type = if face_id < features.cylindrical_faces as u32 {
+        // Assign face type based on STEP features
+        let face_type = if i < features.cylindrical_faces {
             "cylindrical"
-        } else if face_id < (features.cylindrical_faces + features.curved_faces) as u32 {
+        } else if i < features.cylindrical_faces + features.curved_faces {
             "curved"
         } else {
-            face_type
+            "planar"
         };
 
         face_groups.push(FaceGroup {
-            face_id,
-            face_type: detected_type.to_string(),
-            start_index,
+            face_id: i as u32,
+            face_type: face_type.to_string(),
+            start_index: (i * 6) as u32,  // 6 indices per face (2 triangles)
             triangle_count: 2,
-            center,
+            center: face_center,
         });
-
-        vertex_offset += 4;
-        face_id += 1;
     }
 
-    // Add additional face groups to match STEP face count (markers will be placed on these)
-    let total_faces = topology.num_faces.max(6);
-    for extra_id in 6..total_faces {
-        // Distribute extra faces evenly across the cube surface
-        let base_face = (extra_id % 6) as usize;
-        let (_, _, base_type) = face_defs[base_face];
+    // Add additional face groups for STEP faces beyond 6
+    for extra_id in 6..topology.num_faces {
+        // Distribute extra faces markers around the model
+        let angle = (extra_id as f64) * 2.0 * std::f64::consts::PI / (topology.num_faces as f64);
+        let radius = bbox.dimensions[0].max(bbox.dimensions[1]).max(bbox.dimensions[2]) * 0.3;
 
-        // Slight offset for marker placement
-        let offset = (extra_id as f64 - 6.0) * 2.0;
-        let center = [
-            (extra_id % 2) as f64 * 10.0 - 5.0 + offset,
-            ((extra_id / 2) % 2) as f64 * 10.0 - 5.0,
-            ((extra_id / 4) % 2) as f64 * 10.0 - 5.0,
+        let face_center = [
+            center[0] + radius * angle.cos(),
+            center[1] + radius * angle.sin() * 0.5,
+            center[2] + radius * angle.sin() * 0.5,
         ];
 
         let face_type = if extra_id < features.cylindrical_faces {
@@ -404,23 +488,17 @@ fn parse_step_to_mesh(content: &str) -> std::result::Result<(MeshData, BoundingB
         } else if extra_id < features.cylindrical_faces + features.curved_faces {
             "curved"
         } else {
-            base_type
+            "planar"
         };
 
         face_groups.push(FaceGroup {
             face_id: extra_id as u32,
             face_type: face_type.to_string(),
-            start_index: 0, // Points to first triangle (visual placeholder)
-            triangle_count: 0, // Marker only, no geometry
-            center,
+            start_index: 0,  // Visual marker only
+            triangle_count: 0,
+            center: face_center,
         });
     }
-
-    let bbox = BoundingBox {
-        min: [-half as f64, -half as f64, -half as f64],
-        max: [half as f64, half as f64, half as f64],
-        dimensions: [size as f64, size as f64, size as f64],
-    };
 
     Ok((
         MeshData {

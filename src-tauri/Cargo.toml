@@ -1,6 +1,6 @@
 [package]
 name = "ohmframe-copilot"
-version = "1.0.9"
+version = "1.0.10"
 description = "AI-powered engineering co-pilot for CAD software"
 authors = ["Ohmframe"]
 license = "MIT"
@@ -20,10 +20,8 @@ screenshots = "0.7"
 base64 = "0.22"
 image = "0.24"
 
-# STEP file processing
-truck-stepio = "0.3"
-truck-topology = "0.3"
-truck-polymesh = "0.3"
+# STEP file parsing (simplified - extract coordinates via regex)
+regex = "1.10"
 
 [features]
 default = ["custom-protocol"]
