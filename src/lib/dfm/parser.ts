@@ -175,7 +175,10 @@ export function parseDfmResponse(
 }
 
 /**
- * Group DFM results by severity for UI display
+ * Group DFM results by status for UI display
+ * - All "fail" status rules go to critical (regardless of rule severity)
+ * - All "warning" status rules go to warnings
+ * - All "pass" status rules go to passed
  */
 export function groupDfmResults(result: DfmAnalysisResult): GroupedDfmResults {
   const grouped: GroupedDfmResults = {
@@ -186,17 +189,10 @@ export function groupDfmResults(result: DfmAnalysisResult): GroupedDfmResults {
   };
 
   for (const ruleResult of result.ruleResults) {
-    // Get the rule definition to check severity
-    const rule = getRuleById(ruleResult.ruleId);
-    const severity = rule?.severity || "info";
-
     switch (ruleResult.status) {
       case "fail":
-        if (severity === "critical") {
-          grouped.critical.push(ruleResult);
-        } else {
-          grouped.warnings.push(ruleResult);
-        }
+        // All failures are critical - they indicate the rule check failed
+        grouped.critical.push(ruleResult);
         break;
       case "warning":
         grouped.warnings.push(ruleResult);
@@ -211,20 +207,28 @@ export function groupDfmResults(result: DfmAnalysisResult): GroupedDfmResults {
     }
   }
 
-  // Sort each group by confidence (highest first)
-  const sortByConfidence = (a: DfmRuleResult, b: DfmRuleResult) =>
-    b.confidence - a.confidence;
+  // Sort each group: critical severity first within each group, then by confidence
+  const sortByPriority = (a: DfmRuleResult, b: DfmRuleResult) => {
+    const ruleA = getRuleById(a.ruleId);
+    const ruleB = getRuleById(b.ruleId);
+    const severityOrder = { critical: 0, warning: 1, info: 2 };
+    const sevA = severityOrder[ruleA?.severity || "info"];
+    const sevB = severityOrder[ruleB?.severity || "info"];
+    if (sevA !== sevB) return sevA - sevB;
+    return b.confidence - a.confidence;
+  };
 
-  grouped.critical.sort(sortByConfidence);
-  grouped.warnings.sort(sortByConfidence);
-  grouped.passed.sort(sortByConfidence);
-  grouped.notApplicable.sort(sortByConfidence);
+  grouped.critical.sort(sortByPriority);
+  grouped.warnings.sort(sortByPriority);
+  grouped.passed.sort(sortByPriority);
+  grouped.notApplicable.sort(sortByPriority);
 
   return grouped;
 }
 
 /**
  * Calculate summary statistics for display
+ * Note: criticalFailures = failedCount (all fails are critical)
  */
 export function getDfmStats(result: DfmAnalysisResult): {
   totalRules: number;
@@ -238,7 +242,6 @@ export function getDfmStats(result: DfmAnalysisResult): {
   let failedCount = 0;
   let warningCount = 0;
   let naCount = 0;
-  let criticalFailures = 0;
 
   for (const ruleResult of result.ruleResults) {
     switch (ruleResult.status) {
@@ -247,10 +250,6 @@ export function getDfmStats(result: DfmAnalysisResult): {
         break;
       case "fail":
         failedCount++;
-        const rule = getRuleById(ruleResult.ruleId);
-        if (rule?.severity === "critical") {
-          criticalFailures++;
-        }
         break;
       case "warning":
         warningCount++;
@@ -266,7 +265,7 @@ export function getDfmStats(result: DfmAnalysisResult): {
     failedCount,
     warningCount,
     naCount,
-    criticalFailures,
+    criticalFailures: failedCount, // All failures are shown as critical
   };
 }
 

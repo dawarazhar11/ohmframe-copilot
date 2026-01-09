@@ -1,6 +1,6 @@
 [package]
 name = "ohmframe-copilot"
-version = "1.0.13"
+version = "1.0.14"
 description = "AI-powered engineering co-pilot for CAD software"
 authors = ["Ohmframe"]
 license = "MIT"

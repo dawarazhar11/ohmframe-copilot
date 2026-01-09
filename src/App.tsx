@@ -74,14 +74,6 @@ interface Message {
   dfmStats?: DfmStats;
 }
 
-interface AnalysisRequest {
-  image: string;
-  prompt: string;
-  context?: string;
-  mode?: "general" | "dfm";
-  stepData?: StepAnalysisResult;
-}
-
 type AnalysisMode = "general" | "dfm";
 
 // STEP file analysis types (matches Rust structs)
@@ -343,6 +335,38 @@ function App() {
     setMessages((prev) => [...prev, userMsg]);
 
     try {
+      // Determine if we have an image to send
+      const imageToSend = image || lastCapture;
+
+      // In DFM mode with STEP data, image is optional
+      // In other modes, we need either an image or STEP data
+      if (!imageToSend && !stepData) {
+        throw new Error("Please capture a screenshot or upload a STEP file first");
+      }
+
+      // Build request body - only include image if we have one
+      const requestBody: Record<string, unknown> = {
+        prompt: stepData
+          ? `${prompt}\n\nSTEP File Data: ${JSON.stringify(stepData, null, 2)}`
+          : prompt,
+        mode: analysisMode,
+      };
+
+      // Include image only if available
+      if (imageToSend) {
+        requestBody.image = imageToSend;
+      }
+
+      // Only send custom context for general mode; DFM mode uses server-side prompt
+      if (analysisMode === "general") {
+        requestBody.context = ENGINEERING_CONTEXT;
+      }
+
+      // Include STEP data if available
+      if (stepData) {
+        requestBody.stepData = stepData;
+      }
+
       // Call the Ohmframe API for vision analysis
       const response = await fetch("https://ai.ohmframe.com/api/vision", {
         method: "POST",
@@ -350,17 +374,7 @@ function App() {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${apiKey}`,
         },
-        body: JSON.stringify({
-          image: image || lastCapture,
-          prompt: stepData
-            ? `${prompt}\n\nSTEP File Data: ${JSON.stringify(stepData, null, 2)}`
-            : prompt,
-          mode: analysisMode,
-          // Only send custom context for general mode; DFM mode uses server-side prompt
-          ...(analysisMode === "general" ? { context: ENGINEERING_CONTEXT } : {}),
-          // Include STEP data if available
-          ...(stepData ? { stepData } : {}),
-        } as AnalysisRequest),
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok) {
@@ -482,6 +496,9 @@ function App() {
             {stepData.topology?.num_faces || 0} faces •{" "}
             {stepData.features?.cylindrical_faces || 0} holes
           </span>
+          {analysisMode === "dfm" && (
+            <span className="step-hint">Ready for DFM analysis</span>
+          )}
           <button className="step-clear" onClick={clearStepData}>×</button>
         </div>
       )}
@@ -491,10 +508,20 @@ function App() {
         {messages.length === 0 ? (
           <div className="welcome">
             <h2>Engineering Co-Pilot</h2>
-            <p>Click "Capture Screen" to capture your CAD screen, then ask questions about your design.</p>
+            <p>
+              {analysisMode === "dfm"
+                ? "Upload a STEP file or capture screen to run DFM analysis."
+                : "Capture your CAD screen, then ask questions about your design."}
+            </p>
             <div className="quick-actions">
               <button onClick={captureScreen} className="action-btn primary">
                 Capture Screen
+              </button>
+              <button
+                onClick={() => stepInputRef.current?.click()}
+                className="action-btn secondary"
+              >
+                Upload STEP
               </button>
             </div>
             <div className="features">

@@ -166,7 +166,16 @@
 
 .step-info {
   color: #86efac;
-  flex: 1;
+}
+
+.step-hint {
+  color: #4ade80;
+  background: rgba(74, 222, 128, 0.15);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  margin-left: auto;
 }
 
 .step-clear {
@@ -222,6 +231,8 @@
 }
 
 .quick-actions {
+  display: flex;
+  gap: 12px;
   margin-bottom: 32px;
 }
 
@@ -242,6 +253,18 @@
 
 .action-btn.primary:hover {
   background: #00b8e6;
+  transform: translateY(-2px);
+}
+
+.action-btn.secondary {
+  background: #2a6a4a;
+  color: #4ade80;
+  font-weight: 600;
+  border: 1px solid #3a8a5a;
+}
+
+.action-btn.secondary:hover {
+  background: #3a8a5a;
   transform: translateY(-2px);
 }
 
@@ -856,11 +879,68 @@
 /* 3D Model Viewer */
 .model-viewer-container {
   width: 100%;
-  height: 350px;
+  height: 400px;
   background: #0d0d1a;
   border-radius: 8px;
   overflow: hidden;
   border: 1px solid #2a2a4a;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Marker filter bar */
+.marker-filter-bar {
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px;
+  background: #1a1a2e;
+  border-bottom: 1px solid #2a2a4a;
+  flex-shrink: 0;
+}
+
+.filter-btn {
+  padding: 5px 10px;
+  border: 1px solid #3a3a5a;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: #2a2a4a;
+  color: #888;
+  font-weight: 500;
+}
+
+.filter-btn:hover {
+  background: #3a3a5a;
+  color: #fff;
+}
+
+.filter-btn.active {
+  font-weight: 600;
+}
+
+.filter-btn.filter-all.active {
+  background: #00d4ff;
+  color: #000;
+  border-color: #00d4ff;
+}
+
+.filter-btn.filter-fail.active {
+  background: #ff4444;
+  color: #fff;
+  border-color: #ff4444;
+}
+
+.filter-btn.filter-warning.active {
+  background: #f5a623;
+  color: #000;
+  border-color: #f5a623;
+}
+
+.filter-btn.filter-pass.active {
+  background: #4ade80;
+  color: #000;
+  border-color: #4ade80;
 }
 
 .viewer-toggle {

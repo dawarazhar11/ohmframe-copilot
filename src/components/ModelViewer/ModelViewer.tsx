@@ -6,23 +6,32 @@ import type { MeshData, FaceGroup, FailedFace } from "../../lib/mesh/types";
 import type { DfmRuleResult } from "../../lib/dfm/types";
 import { getRuleById } from "../../lib/dfm";
 
+type MarkerFilter = "all" | "fail" | "warning" | "pass";
+
 interface ModelViewerProps {
   meshData: MeshData;
   dfmResults?: DfmRuleResult[];
   onMarkerClick?: (ruleId: string) => void;
 }
 
-// Map DFM failures to face groups
-function mapFailuresToFaces(
+// Extended FailedFace to include pass status
+interface MarkerData extends Omit<FailedFace, 'status'> {
+  status: 'fail' | 'warning' | 'pass';
+}
+
+// Map DFM results to face groups (including passes)
+function mapResultsToFaces(
   dfmResults: DfmRuleResult[] | undefined,
   faceGroups: FaceGroup[]
-): FailedFace[] {
+): MarkerData[] {
   if (!dfmResults || dfmResults.length === 0) return [];
 
-  const failedFaces: FailedFace[] = [];
+  const markerData: MarkerData[] = [];
+  let faceIndex = 0;
 
   for (const result of dfmResults) {
-    if (result.status !== "fail" && result.status !== "warning") continue;
+    // Skip N/A results
+    if (result.status === "na") continue;
 
     const rule = getRuleById(result.ruleId);
     if (!rule) continue;
@@ -33,29 +42,43 @@ function mapFailuresToFaces(
     if (rule.category === "Holes" || rule.name.toLowerCase().includes("hole")) {
       matchingFaces = faceGroups.filter((g) => g.face_type === "cylindrical");
     } else if (rule.category === "Bending") {
-      // Bends are typically at edges between planar faces
       matchingFaces = faceGroups.filter((g) => g.face_type === "planar").slice(0, 2);
     } else if (rule.category === "Walls" || rule.name.toLowerCase().includes("wall")) {
       matchingFaces = faceGroups.filter((g) => g.face_type === "planar").slice(0, 1);
     } else {
-      // Default: pick first face
+      // Distribute other rules across available faces
       if (faceGroups.length > 0) {
-        matchingFaces = [faceGroups[0]];
+        matchingFaces = [faceGroups[faceIndex % faceGroups.length]];
+        faceIndex++;
       }
     }
 
+    // If no matching faces, use center of model
+    if (matchingFaces.length === 0 && faceGroups.length > 0) {
+      matchingFaces = [faceGroups[0]];
+    }
+
     for (const face of matchingFaces) {
-      failedFaces.push({
+      markerData.push({
         ruleId: result.ruleId,
         faceId: face.face_id,
         center: face.center,
         faceType: face.face_type,
-        status: result.status as "fail" | "warning",
+        status: result.status as 'fail' | 'warning' | 'pass',
       });
     }
   }
 
-  return failedFaces;
+  return markerData;
+}
+
+// Legacy function for compatibility
+function mapFailuresToFaces(
+  dfmResults: DfmRuleResult[] | undefined,
+  faceGroups: FaceGroup[]
+): FailedFace[] {
+  return mapResultsToFaces(dfmResults, faceGroups)
+    .filter(m => m.status === 'fail' || m.status === 'warning') as FailedFace[];
 }
 
 // Mesh component
@@ -122,22 +145,40 @@ function StepMesh({
 
 // Single marker component with hover state
 function Marker({
-  failure,
+  marker,
   onClick,
 }: {
-  failure: FailedFace;
+  marker: MarkerData;
   onClick?: (ruleId: string) => void;
 }) {
   const [hovered, setHovered] = useState(false);
-  const rule = getRuleById(failure.ruleId);
-  const isError = failure.status === "fail";
-  const color = isError ? "#ff4444" : "#f5a623";
+  const rule = getRuleById(marker.ruleId);
+
+  // Color based on status
+  const getColor = () => {
+    switch (marker.status) {
+      case "fail": return "#ff4444";
+      case "warning": return "#f5a623";
+      case "pass": return "#4ade80";
+      default: return "#888888";
+    }
+  };
+  const color = getColor();
+
+  const getStatusLabel = () => {
+    switch (marker.status) {
+      case "fail": return "CRITICAL";
+      case "warning": return "WARNING";
+      case "pass": return "PASS";
+      default: return "N/A";
+    }
+  };
 
   return (
-    <group position={failure.center}>
+    <group position={marker.center}>
       {/* Larger sphere marker */}
       <mesh
-        onClick={() => onClick?.(failure.ruleId)}
+        onClick={() => onClick?.(marker.ruleId)}
         onPointerOver={() => setHovered(true)}
         onPointerOut={() => setHovered(false)}
       >
@@ -176,7 +217,7 @@ function Marker({
             border: "2px solid white",
           }}
         >
-          {failure.ruleId}
+          {marker.ruleId}
         </div>
       </Html>
 
@@ -204,7 +245,7 @@ function Marker({
               marginBottom: "8px",
               color: color,
             }}>
-              {failure.ruleId}
+              {marker.ruleId}
             </div>
             <div style={{ marginBottom: "6px", fontWeight: "500" }}>
               {rule.name}
@@ -224,12 +265,12 @@ function Marker({
               flexWrap: "wrap",
             }}>
               <span style={{
-                background: isError ? "#ff4444" : "#f5a623",
+                background: color,
                 padding: "2px 8px",
                 borderRadius: "4px",
                 fontWeight: "bold",
               }}>
-                {isError ? "FAIL" : "WARNING"}
+                {getStatusLabel()}
               </span>
               <span style={{
                 background: "#444",
@@ -243,7 +284,7 @@ function Marker({
                 padding: "2px 8px",
                 borderRadius: "4px"
               }}>
-                {failure.faceType}
+                {marker.faceType}
               </span>
             </div>
             <div style={{
@@ -261,30 +302,35 @@ function Marker({
   );
 }
 
-// Failure markers component
-function FailureMarkers({
-  failures,
+// Markers component with filter support
+function DfmMarkers({
+  markers,
+  filter,
   onClick,
 }: {
-  failures: FailedFace[];
+  markers: MarkerData[];
+  filter: MarkerFilter;
   onClick?: (ruleId: string) => void;
 }) {
-  // Deduplicate by ruleId
-  const uniqueFailures = useMemo(() => {
+  // Filter and deduplicate by ruleId
+  const filteredMarkers = useMemo(() => {
     const seen = new Set<string>();
-    return failures.filter((f) => {
-      if (seen.has(f.ruleId)) return false;
-      seen.add(f.ruleId);
+    return markers.filter((m) => {
+      // Apply filter
+      if (filter !== "all" && m.status !== filter) return false;
+      // Deduplicate
+      if (seen.has(m.ruleId)) return false;
+      seen.add(m.ruleId);
       return true;
     });
-  }, [failures]);
+  }, [markers, filter]);
 
   return (
     <group>
-      {uniqueFailures.map((failure, idx) => (
+      {filteredMarkers.map((marker, idx) => (
         <Marker
-          key={`${failure.ruleId}-${idx}`}
-          failure={failure}
+          key={`${marker.ruleId}-${idx}`}
+          marker={marker}
           onClick={onClick}
         />
       ))}
@@ -344,13 +390,66 @@ function AutoFitCamera({ meshData }: { meshData: MeshData }) {
 }
 
 export function ModelViewer({ meshData, dfmResults, onMarkerClick }: ModelViewerProps) {
+  const [filter, setFilter] = useState<MarkerFilter>("all");
+
+  // Get all marker data (including passes)
+  const allMarkers = useMemo(
+    () => mapResultsToFaces(dfmResults, meshData.face_groups),
+    [dfmResults, meshData.face_groups]
+  );
+
+  // Get failed faces for mesh coloring (only fail/warning)
   const failedFaces = useMemo(
     () => mapFailuresToFaces(dfmResults, meshData.face_groups),
     [dfmResults, meshData.face_groups]
   );
 
+  // Count markers by status
+  const counts = useMemo(() => {
+    const seen = new Set<string>();
+    const uniqueMarkers = allMarkers.filter(m => {
+      if (seen.has(m.ruleId)) return false;
+      seen.add(m.ruleId);
+      return true;
+    });
+    return {
+      all: uniqueMarkers.length,
+      fail: uniqueMarkers.filter(m => m.status === "fail").length,
+      warning: uniqueMarkers.filter(m => m.status === "warning").length,
+      pass: uniqueMarkers.filter(m => m.status === "pass").length,
+    };
+  }, [allMarkers]);
+
   return (
     <div className="model-viewer-container">
+      {/* Filter buttons */}
+      <div className="marker-filter-bar">
+        <button
+          className={`filter-btn filter-all ${filter === "all" ? "active" : ""}`}
+          onClick={() => setFilter("all")}
+        >
+          All ({counts.all})
+        </button>
+        <button
+          className={`filter-btn filter-fail ${filter === "fail" ? "active" : ""}`}
+          onClick={() => setFilter("fail")}
+        >
+          Critical ({counts.fail})
+        </button>
+        <button
+          className={`filter-btn filter-warning ${filter === "warning" ? "active" : ""}`}
+          onClick={() => setFilter("warning")}
+        >
+          Warning ({counts.warning})
+        </button>
+        <button
+          className={`filter-btn filter-pass ${filter === "pass" ? "active" : ""}`}
+          onClick={() => setFilter("pass")}
+        >
+          Passed ({counts.pass})
+        </button>
+      </div>
+
       <Canvas camera={{ fov: 45, near: 0.001, far: 10000 }}>
         <Suspense fallback={<LoadingFallback />}>
           {/* Lighting setup for CAD-style rendering */}
@@ -361,7 +460,7 @@ export function ModelViewer({ meshData, dfmResults, onMarkerClick }: ModelViewer
 
           <Center>
             <StepMesh meshData={meshData} failedFaces={failedFaces} />
-            <FailureMarkers failures={failedFaces} onClick={onMarkerClick} />
+            <DfmMarkers markers={allMarkers} filter={filter} onClick={onMarkerClick} />
           </Center>
 
           <AutoFitCamera meshData={meshData} />
