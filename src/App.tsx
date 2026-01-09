@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import { DfmResults } from "./components/DfmResults";
 import { ModelViewer } from "./components/ModelViewer";
 import type { DfmAnalysisResult, GroupedDfmResults } from "./lib/dfm/types";
+import { groupDfmResults, getDfmStats } from "./lib/dfm/parser";
 import type { MeshData, StepMeshResult } from "./lib/mesh/types";
 import { loadStepToMesh } from "./lib/stepLoader";
 
@@ -383,6 +384,17 @@ function App() {
 
       const data = await response.json();
 
+      // Re-group DFM results locally to ensure correct critical/warning categorization
+      // The server may group differently, so we apply our own grouping logic
+      let dfmGrouped = data.dfmGrouped;
+      let dfmStats = data.dfmStats;
+
+      if (data.dfmAnalysis) {
+        // Re-group using local function to fix critical/warning classification
+        dfmGrouped = groupDfmResults(data.dfmAnalysis);
+        dfmStats = getDfmStats(data.dfmAnalysis);
+      }
+
       // Create assistant message with optional DFM structured data
       const assistantMsg: Message = {
         id: `assistant-${Date.now()}`,
@@ -391,8 +403,8 @@ function App() {
         timestamp: new Date(),
         // Include DFM structured data if available (DFM mode returns these)
         dfmAnalysis: data.dfmAnalysis,
-        dfmGrouped: data.dfmGrouped,
-        dfmStats: data.dfmStats,
+        dfmGrouped: dfmGrouped,
+        dfmStats: dfmStats,
       };
       setMessages((prev) => [...prev, assistantMsg]);
     } catch (err) {

@@ -201,99 +201,91 @@ function Marker({
         />
       </mesh>
 
-      {/* Always visible label */}
-      <Html center distanceFactor={10} style={{ pointerEvents: "none" }}>
+      {/* Always visible label - no distanceFactor so it stays readable */}
+      <Html center style={{ pointerEvents: "none" }}>
         <div
           style={{
             background: color,
             color: "white",
-            padding: "4px 10px",
-            borderRadius: "6px",
-            fontSize: "14px",
+            padding: "6px 14px",
+            borderRadius: "8px",
+            fontSize: "16px",
             fontWeight: "bold",
             whiteSpace: "nowrap",
             fontFamily: "monospace",
-            boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
-            border: "2px solid white",
+            boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
+            border: "3px solid white",
+            transform: "translateY(-30px)",
           }}
         >
           {marker.ruleId}
         </div>
       </Html>
 
-      {/* Hover popup with details */}
+      {/* Hover popup with details - fixed size, always readable */}
       {hovered && rule && (
-        <Html center distanceFactor={8} style={{ pointerEvents: "none" }}>
+        <Html center style={{ pointerEvents: "none" }}>
           <div
             style={{
-              background: "rgba(20, 20, 30, 0.95)",
+              background: "rgba(15, 15, 25, 0.98)",
               color: "white",
-              padding: "12px 16px",
-              borderRadius: "8px",
-              fontSize: "13px",
-              fontFamily: "system-ui, sans-serif",
-              minWidth: "200px",
-              maxWidth: "280px",
-              boxShadow: "0 4px 20px rgba(0,0,0,0.5)",
-              border: `2px solid ${color}`,
-              marginTop: "-80px",
+              padding: "16px 20px",
+              borderRadius: "12px",
+              fontSize: "14px",
+              fontFamily: "system-ui, -apple-system, sans-serif",
+              minWidth: "280px",
+              maxWidth: "350px",
+              boxShadow: "0 8px 32px rgba(0,0,0,0.6)",
+              border: `3px solid ${color}`,
+              transform: "translateY(-120px)",
             }}
           >
             <div style={{
               fontWeight: "bold",
-              fontSize: "15px",
-              marginBottom: "8px",
+              fontSize: "18px",
+              marginBottom: "10px",
               color: color,
             }}>
               {marker.ruleId}
             </div>
-            <div style={{ marginBottom: "6px", fontWeight: "500" }}>
+            <div style={{
+              marginBottom: "8px",
+              fontWeight: "600",
+              fontSize: "15px",
+            }}>
               {rule.name}
             </div>
             <div style={{
-              fontSize: "12px",
-              color: "#aaa",
-              marginBottom: "8px",
-              lineHeight: "1.4",
+              fontSize: "13px",
+              color: "#bbb",
+              marginBottom: "12px",
+              lineHeight: "1.5",
             }}>
               {rule.description}
             </div>
             <div style={{
               display: "flex",
-              gap: "8px",
-              fontSize: "11px",
+              gap: "10px",
+              fontSize: "12px",
               flexWrap: "wrap",
             }}>
               <span style={{
                 background: color,
-                padding: "2px 8px",
-                borderRadius: "4px",
+                padding: "4px 12px",
+                borderRadius: "6px",
                 fontWeight: "bold",
+                color: marker.status === "warning" ? "#000" : "#fff",
               }}>
                 {getStatusLabel()}
               </span>
               <span style={{
-                background: "#444",
-                padding: "2px 8px",
-                borderRadius: "4px"
+                background: "#555",
+                padding: "4px 12px",
+                borderRadius: "6px",
+                fontWeight: "500",
               }}>
                 {rule.category}
               </span>
-              <span style={{
-                background: "#333",
-                padding: "2px 8px",
-                borderRadius: "4px"
-              }}>
-                {marker.faceType}
-              </span>
-            </div>
-            <div style={{
-              fontSize: "10px",
-              color: "#666",
-              marginTop: "8px",
-              textAlign: "center",
-            }}>
-              Click to view details
             </div>
           </div>
         </Html>
