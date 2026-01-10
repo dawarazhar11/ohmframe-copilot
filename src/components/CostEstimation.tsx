@@ -29,11 +29,20 @@ interface VolumeBreak {
   savings: number;
 }
 
+interface WeightData {
+  weightKg: number;
+  pricePerKg: number;
+  materialCost: number;
+  source: "live" | "cached" | "static";
+}
+
 interface CostApiResponse {
   success: boolean;
   estimate: CostEstimate;
   volumeBreaks: VolumeBreak[];
   processLabel: string;
+  weightData?: WeightData;
+  pricingSource?: string;
   alternativeProcesses?: {
     process: ManufacturingProcess;
     unitCost: number;
@@ -81,6 +90,7 @@ export function CostEstimation({ process, stepData, onGetQuote }: CostEstimation
   const [error, setError] = useState<string | null>(null);
   const [estimate, setEstimate] = useState<CostEstimate | null>(null);
   const [volumeBreaks, setVolumeBreaks] = useState<VolumeBreak[]>([]);
+  const [weightData, setWeightData] = useState<WeightData | null>(null);
 
   // Fetch cost estimate from API
   const fetchCostEstimate = useCallback(async (qty: number) => {
@@ -122,6 +132,7 @@ export function CostEstimation({ process, stepData, onGetQuote }: CostEstimation
       if (data.success) {
         setEstimate(data.estimate);
         setVolumeBreaks(data.volumeBreaks);
+        setWeightData(data.weightData || null);
       } else {
         throw new Error("Cost estimation failed");
       }
@@ -177,6 +188,27 @@ export function CostEstimation({ process, stepData, onGetQuote }: CostEstimation
           ))}
         </select>
       </div>
+
+      {/* Weight and Material Cost (when available) */}
+      {weightData && (
+        <div className="cost-weight-info">
+          <div className="weight-row">
+            <span className="weight-label">Part Weight:</span>
+            <span className="weight-value">{weightData.weightKg.toFixed(3)} kg</span>
+          </div>
+          <div className="weight-row">
+            <span className="weight-label">Material Price:</span>
+            <span className="weight-value">${weightData.pricePerKg.toFixed(2)}/kg</span>
+            <span className={`weight-source ${weightData.source}`}>
+              {weightData.source === "live" ? "LIVE" : weightData.source === "cached" ? "CACHED" : "STATIC"}
+            </span>
+          </div>
+          <div className="weight-row">
+            <span className="weight-label">Material Cost:</span>
+            <span className="weight-value">${weightData.materialCost.toFixed(2)}</span>
+          </div>
+        </div>
+      )}
 
       {/* Quantity Selector */}
       <div className="cost-quantity">

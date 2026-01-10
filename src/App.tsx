@@ -7,6 +7,7 @@ import { DfmResults } from "./components/DfmResults";
 import { ModelViewer } from "./components/ModelViewer";
 import { CostEstimation } from "./components/CostEstimation";
 import { ManufacturingInfo } from "./components/ManufacturingInfo";
+import { ToleranceStackup } from "./components/ToleranceStackup";
 import type { DfmAnalysisResult, GroupedDfmResults } from "./lib/dfm/types";
 import type { ManufacturingProcess } from "./lib/cost/types";
 import { groupDfmResults, getDfmStats } from "./lib/dfm/parser";
@@ -135,7 +136,7 @@ function App() {
   const [stepData, setStepData] = useState<StepAnalysisResult | null>(null);
   const [isLoadingStep, setIsLoadingStep] = useState(false);
   const [meshData, setMeshData] = useState<MeshData | null>(null);
-  const [activeResultTab, setActiveResultTab] = useState<"dfm" | "3d" | "cost" | "mfg">("dfm");
+  const [activeResultTab, setActiveResultTab] = useState<"dfm" | "3d" | "cost" | "mfg" | "tolerance">("dfm");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const stepInputRef = useRef<HTMLInputElement>(null);
 
@@ -595,6 +596,12 @@ function App() {
                         >
                           Manufacturing
                         </button>
+                        <button
+                          className={`dfm-tab tolerance-tab ${activeResultTab === "tolerance" ? "active" : ""}`}
+                          onClick={() => setActiveResultTab("tolerance")}
+                        >
+                          Tolerance
+                        </button>
                       </div>
 
                       {/* Conditionally show based on active tab */}
@@ -633,6 +640,8 @@ function App() {
                             bounding_box: stepData.bounding_box,
                           } : undefined}
                         />
+                      ) : activeResultTab === "tolerance" ? (
+                        <ToleranceStackup />
                       ) : (
                         <DfmResults
                           dfmAnalysis={msg.dfmAnalysis}
