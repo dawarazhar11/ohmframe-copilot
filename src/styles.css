@@ -1115,6 +1115,40 @@
   border-radius: 4px;
 }
 
+/* Material Selector */
+.cost-material {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.cost-material label {
+  color: #888;
+  font-size: 13px;
+  min-width: 60px;
+}
+
+.cost-material select {
+  flex: 1;
+  padding: 8px 12px;
+  background: #1a1a2e;
+  border: 1px solid #3a3a5a;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.cost-material select:hover {
+  border-color: #4a9eff;
+}
+
+.cost-material select:focus {
+  outline: none;
+  border-color: #4a9eff;
+}
+
 /* Quantity Selector */
 .cost-quantity {
   display: flex;

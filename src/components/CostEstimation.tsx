@@ -56,12 +56,26 @@ interface CostEstimationProps {
     bounding_box?: {
       dimensions: [number, number, number];
     };
+    volume?: number;
   };
   onGetQuote?: () => void;
 }
 
+const MATERIAL_OPTIONS = [
+  { value: "aluminum", label: "Aluminum" },
+  { value: "steel", label: "Steel" },
+  { value: "stainless_steel", label: "Stainless Steel" },
+  { value: "copper", label: "Copper" },
+  { value: "brass", label: "Brass" },
+  { value: "titanium", label: "Titanium" },
+  { value: "abs_plastic", label: "ABS Plastic" },
+  { value: "nylon", label: "Nylon" },
+  { value: "pla", label: "PLA" },
+];
+
 export function CostEstimation({ process, stepData, onGetQuote }: CostEstimationProps) {
   const [quantity, setQuantity] = useState(100);
+  const [material, setMaterial] = useState("aluminum");
   const [showBreakdown, setShowBreakdown] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -92,7 +106,9 @@ export function CostEstimation({ process, stepData, onGetQuote }: CostEstimation
             boundingBox: stepData.bounding_box,
             topology: stepData.topology,
             features: stepData.features,
+            volume: stepData.volume,
           } : undefined,
+          material: { type: material },
           includeAlternatives: true,
         }),
       });
@@ -117,15 +133,15 @@ export function CostEstimation({ process, stepData, onGetQuote }: CostEstimation
     } finally {
       setIsLoading(false);
     }
-  }, [process, stepData]);
+  }, [process, stepData, material]);
 
-  // Fetch on mount and when quantity changes (debounced)
+  // Fetch on mount and when quantity/material changes (debounced)
   useEffect(() => {
     const timer = setTimeout(() => {
       fetchCostEstimate(quantity);
     }, 300);
     return () => clearTimeout(timer);
-  }, [quantity, fetchCostEstimate]);
+  }, [quantity, material, fetchCostEstimate]);
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat("en-US", {
@@ -144,6 +160,22 @@ export function CostEstimation({ process, stepData, onGetQuote }: CostEstimation
           <span>Cost Estimate</span>
         </div>
         <span className="cost-process">{PROCESS_COST_LABELS[process]}</span>
+      </div>
+
+      {/* Material Selector */}
+      <div className="cost-material">
+        <label>Material</label>
+        <select
+          value={material}
+          onChange={(e) => setMaterial(e.target.value)}
+          disabled={isLoading}
+        >
+          {MATERIAL_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
       </div>
 
       {/* Quantity Selector */}
