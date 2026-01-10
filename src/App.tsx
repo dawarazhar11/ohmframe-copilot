@@ -5,7 +5,9 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { DfmResults } from "./components/DfmResults";
 import { ModelViewer } from "./components/ModelViewer";
+import { CostEstimation } from "./components/CostEstimation";
 import type { DfmAnalysisResult, GroupedDfmResults } from "./lib/dfm/types";
+import type { ManufacturingProcess } from "./lib/cost/types";
 import { groupDfmResults, getDfmStats } from "./lib/dfm/parser";
 import type { MeshData, StepMeshResult } from "./lib/mesh/types";
 import { loadStepToMesh } from "./lib/stepLoader";
@@ -132,7 +134,7 @@ function App() {
   const [stepData, setStepData] = useState<StepAnalysisResult | null>(null);
   const [isLoadingStep, setIsLoadingStep] = useState(false);
   const [meshData, setMeshData] = useState<MeshData | null>(null);
-  const [show3DViewer, setShow3DViewer] = useState(false);
+  const [activeResultTab, setActiveResultTab] = useState<"dfm" | "3d" | "cost">("dfm");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const stepInputRef = useRef<HTMLInputElement>(null);
 
@@ -314,7 +316,7 @@ function App() {
   const clearStepData = () => {
     setStepData(null);
     setMeshData(null);
-    setShow3DViewer(false);
+    setActiveResultTab("dfm");
   };
 
   const analyzeWithVision = async (prompt: string, image?: string) => {
@@ -564,36 +566,55 @@ function App() {
                   // Check if we have structured DFM results
                   msg.dfmAnalysis && msg.dfmGrouped && msg.dfmStats ? (
                     <div className="dfm-results-container">
-                      {/* View toggle for 3D/List when mesh data is available */}
-                      {meshData && (
-                        <div className="view-toggle">
+                      {/* Tabs for DFM/3D/Cost views */}
+                      <div className="dfm-tabs">
+                        <button
+                          className={`dfm-tab ${activeResultTab === "dfm" ? "active" : ""}`}
+                          onClick={() => setActiveResultTab("dfm")}
+                        >
+                          DFM Analysis
+                        </button>
+                        {meshData && (
                           <button
-                            className={`view-btn ${!show3DViewer ? "active" : ""}`}
-                            onClick={() => setShow3DViewer(false)}
-                          >
-                            List View
-                          </button>
-                          <button
-                            className={`view-btn ${show3DViewer ? "active" : ""}`}
-                            onClick={() => setShow3DViewer(true)}
+                            className={`dfm-tab ${activeResultTab === "3d" ? "active" : ""}`}
+                            onClick={() => setActiveResultTab("3d")}
                           >
                             3D View
                           </button>
-                        </div>
-                      )}
+                        )}
+                        <button
+                          className={`dfm-tab cost-tab ${activeResultTab === "cost" ? "active" : ""}`}
+                          onClick={() => setActiveResultTab("cost")}
+                        >
+                          Cost Estimate
+                        </button>
+                      </div>
 
-                      {/* Conditionally show 3D viewer or list view */}
-                      {show3DViewer && meshData ? (
+                      {/* Conditionally show based on active tab */}
+                      {activeResultTab === "3d" && meshData ? (
                         <ModelViewer
                           meshData={meshData}
                           dfmResults={msg.dfmAnalysis.ruleResults}
                           onMarkerClick={(ruleId) => {
-                            // Switch to list view and scroll to rule
-                            setShow3DViewer(false);
+                            // Switch to DFM tab and scroll to rule
+                            setActiveResultTab("dfm");
                             setTimeout(() => {
                               const el = document.getElementById(`rule-${ruleId}`);
                               el?.scrollIntoView({ behavior: "smooth", block: "center" });
                             }, 100);
+                          }}
+                        />
+                      ) : activeResultTab === "cost" ? (
+                        <CostEstimation
+                          process={msg.dfmAnalysis.processDetected as ManufacturingProcess}
+                          stepData={stepData ? {
+                            topology: stepData.topology,
+                            features: stepData.features,
+                            bounding_box: stepData.bounding_box,
+                          } : undefined}
+                          onGetQuote={() => {
+                            // Open the Ohmframe portal for detailed quote
+                            window.open("https://ohmframe.com/quote", "_blank");
                           }}
                         />
                       ) : (
