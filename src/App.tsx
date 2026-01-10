@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import { DfmResults } from "./components/DfmResults";
 import { ModelViewer } from "./components/ModelViewer";
 import { CostEstimation } from "./components/CostEstimation";
+import { ManufacturingInfo } from "./components/ManufacturingInfo";
 import type { DfmAnalysisResult, GroupedDfmResults } from "./lib/dfm/types";
 import type { ManufacturingProcess } from "./lib/cost/types";
 import { groupDfmResults, getDfmStats } from "./lib/dfm/parser";
@@ -134,7 +135,7 @@ function App() {
   const [stepData, setStepData] = useState<StepAnalysisResult | null>(null);
   const [isLoadingStep, setIsLoadingStep] = useState(false);
   const [meshData, setMeshData] = useState<MeshData | null>(null);
-  const [activeResultTab, setActiveResultTab] = useState<"dfm" | "3d" | "cost">("dfm");
+  const [activeResultTab, setActiveResultTab] = useState<"dfm" | "3d" | "cost" | "mfg">("dfm");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const stepInputRef = useRef<HTMLInputElement>(null);
 
@@ -588,6 +589,12 @@ function App() {
                         >
                           Cost Estimate
                         </button>
+                        <button
+                          className={`dfm-tab mfg-tab ${activeResultTab === "mfg" ? "active" : ""}`}
+                          onClick={() => setActiveResultTab("mfg")}
+                        >
+                          Manufacturing
+                        </button>
                       </div>
 
                       {/* Conditionally show based on active tab */}
@@ -616,6 +623,15 @@ function App() {
                             // Open the Ohmframe portal for detailed quote
                             window.open("https://ohmframe.com/quote", "_blank");
                           }}
+                        />
+                      ) : activeResultTab === "mfg" ? (
+                        <ManufacturingInfo
+                          process={msg.dfmAnalysis.processDetected as ManufacturingProcess}
+                          stepData={stepData ? {
+                            topology: stepData.topology,
+                            features: stepData.features,
+                            bounding_box: stepData.bounding_box,
+                          } : undefined}
                         />
                       ) : (
                         <DfmResults
