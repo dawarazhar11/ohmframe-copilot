@@ -2,6 +2,28 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Ecosystem Context
+
+This project is part of the **Ohmframe Ecosystem**. See `../CLAUDE.md` for multi-project orchestration.
+
+```
+ohmframe-ecosystem/
+├── ohmframe-website/     # ohmframe.com (marketing)
+├── ohmframe-portal/      # ai.ohmframe.com (API provider)
+├── ohmframe-copilot/     # <-- YOU ARE HERE (desktop app)
+└── docs/                 # Shared planning docs
+```
+
+**Related Projects:**
+- `../ohmframe-portal/` - Provides API endpoints this app consumes
+- `../ohmframe-website/` - Marketing site with /ai/copilot download page
+- `../docs/ai-apps.md` - Comprehensive AI tools roadmap
+
+**API Dependencies:**
+- `ai.ohmframe.com/api/vision` - DFM image analysis
+- `ai.ohmframe.com/api/cost/estimate` - Cost estimation
+- `ai.ohmframe.com/api/chat` - Engineering chat
+
 ## Project Overview
 
 Ohmframe Copilot is a desktop AI-powered engineering co-pilot for CAD screen analysis and DFM (Design for Manufacturing) review. Built with Tauri 2.x (Rust backend) and React (TypeScript frontend).

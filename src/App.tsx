@@ -8,6 +8,7 @@ import { ModelViewer } from "./components/ModelViewer";
 import { CostEstimation } from "./components/CostEstimation";
 import { ManufacturingInfo } from "./components/ManufacturingInfo";
 import { ToleranceStackup } from "./components/ToleranceStackup";
+import { ToleranceStackupMode } from "./components/ToleranceStackupMode";
 import type { DfmAnalysisResult, GroupedDfmResults } from "./lib/dfm/types";
 import type { ManufacturingProcess } from "./lib/cost/types";
 import { groupDfmResults, getDfmStats } from "./lib/dfm/parser";
@@ -79,7 +80,7 @@ interface Message {
   dfmStats?: DfmStats;
 }
 
-type AnalysisMode = "general" | "dfm";
+type AnalysisMode = "general" | "dfm" | "tolerance";
 
 // STEP file analysis types (matches Rust structs)
 interface StepAnalysisResult {
@@ -134,6 +135,8 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [analysisMode, setAnalysisMode] = useState<AnalysisMode>("general");
   const [stepData, setStepData] = useState<StepAnalysisResult | null>(null);
+  const [stepContent, setStepContent] = useState<string | null>(null);
+  const [stepFilename, setStepFilename] = useState<string | null>(null);
   const [isLoadingStep, setIsLoadingStep] = useState(false);
   const [meshData, setMeshData] = useState<MeshData | null>(null);
   const [activeResultTab, setActiveResultTab] = useState<"dfm" | "3d" | "cost" | "mfg" | "tolerance">("dfm");
@@ -227,6 +230,8 @@ function App() {
 
       if (result.success) {
         setStepData(result);
+        setStepContent(fileContent);
+        setStepFilename(file.name);
 
         // Load mesh data using frontend OCCT loader for accurate 3D rendering
         try {
@@ -317,6 +322,8 @@ function App() {
 
   const clearStepData = () => {
     setStepData(null);
+    setStepContent(null);
+    setStepFilename(null);
     setMeshData(null);
     setActiveResultTab("dfm");
   };
@@ -474,6 +481,12 @@ function App() {
           >
             DFM
           </button>
+          <button
+            className={`mode-btn tolerance ${analysisMode === "tolerance" ? "active" : ""}`}
+            onClick={() => setAnalysisMode("tolerance")}
+          >
+            Tolerance
+          </button>
         </div>
 
         <div className="header-actions">
@@ -519,9 +532,16 @@ function App() {
         </div>
       )}
 
-      {/* Messages */}
+      {/* Main Content Area */}
       <main className="messages">
-        {messages.length === 0 ? (
+        {/* Tolerance Mode - Full screen component */}
+        {analysisMode === "tolerance" ? (
+          <ToleranceStackupMode
+            stepContent={stepContent}
+            stepFilename={stepFilename}
+            onStatusChange={(status) => console.log('[Tolerance]', status)}
+          />
+        ) : messages.length === 0 ? (
           <div className="welcome">
             <h2>Engineering Co-Pilot</h2>
             <p>
@@ -676,8 +696,8 @@ function App() {
         <div ref={messagesEndRef} />
       </main>
 
-      {/* Quick Prompts */}
-      {lastCapture && (
+      {/* Quick Prompts - Hidden in tolerance mode */}
+      {analysisMode !== "tolerance" && lastCapture && (
         <div className="quick-prompts">
           {quickPrompts.map((prompt) => (
             <button
@@ -691,19 +711,21 @@ function App() {
         </div>
       )}
 
-      {/* Input */}
-      <form className="input-area" onSubmit={handleSubmit}>
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder={lastCapture ? "Ask about the captured screen..." : "Capture a screen first"}
-          disabled={isLoading || !lastCapture}
-        />
-        <button type="submit" disabled={isLoading || !input.trim() || !lastCapture}>
-          Send
-        </button>
-      </form>
+      {/* Input - Hidden in tolerance mode */}
+      {analysisMode !== "tolerance" && (
+        <form className="input-area" onSubmit={handleSubmit}>
+          <input
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder={lastCapture ? "Ask about the captured screen..." : "Capture a screen first"}
+            disabled={isLoading || !lastCapture}
+          />
+          <button type="submit" disabled={isLoading || !input.trim() || !lastCapture}>
+            Send
+          </button>
+        </form>
+      )}
 
       {/* Settings Modal */}
       {showSettings && (

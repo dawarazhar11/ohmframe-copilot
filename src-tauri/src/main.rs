@@ -12,6 +12,15 @@ use serde::{Deserialize, Serialize};
 // Regex for parsing STEP coordinates
 use regex::Regex;
 
+// Assembly and tolerance stackup modules
+mod assembly_parser;
+mod interface_detection;
+mod tolerance_calc;
+
+pub use assembly_parser::*;
+pub use interface_detection::*;
+pub use tolerance_calc::*;
+
 /// Result of STEP file analysis
 #[derive(Debug, Serialize, Deserialize)]
 pub struct StepAnalysisResult {
@@ -523,7 +532,11 @@ fn main() {
             analyze_step_content,
             analyze_step_file,
             select_step_file,
-            parse_step_mesh
+            parse_step_mesh,
+            // Assembly and tolerance stackup commands
+            assembly_parser::parse_assembly_step,
+            interface_detection::detect_mating_interfaces,
+            tolerance_calc::calculate_tolerance_stackup
         ])
         .setup(|app| {
             // Get the main window - handle potential errors gracefully
