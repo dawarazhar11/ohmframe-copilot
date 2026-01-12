@@ -67,12 +67,22 @@ function findInterfacesBetweenParts(
   params: InterfaceDetectionParams,
   startId: number
 ): MatingInterface[] {
-  const interfaces: MatingInterface[] = [];
+  const candidates: Array<{
+    interface: MatingInterface;
+    score: number;
+  }> = [];
   let id = startId;
 
   // Transform faces to world coordinates
   const facesA = partA.faces.map((f) => transformFace(f, partA.transform));
   const facesB = partB.faces.map((f) => transformFace(f, partB.transform));
+
+  // Use a more generous proximity for initial filtering - based on bounding box
+  const maxProximity = Math.max(
+    params.proximityThreshold * 50, // 100mm default
+    getBoundingBoxDiagonal(partA) * 0.5,
+    getBoundingBoxDiagonal(partB) * 0.5
+  );
 
   // Check each face pair
   for (let idxA = 0; idxA < facesA.length; idxA++) {
@@ -80,15 +90,30 @@ function findInterfacesBetweenParts(
       const faceA = facesA[idxA];
       const faceB = facesB[idxB];
 
-      // Calculate proximity (distance between face centers)
-      const distance = vecDistance(faceA.center, faceB.center);
-
-      if (distance > params.proximityThreshold) {
+      // Skip non-planar/non-cylindrical faces
+      if (!['planar', 'cylindrical'].includes(faceA.faceType) ||
+          !['planar', 'cylindrical'].includes(faceB.faceType)) {
         continue;
       }
 
-      // Calculate normal alignment
+      // Calculate proximity (distance between face centers)
+      const distance = vecDistance(faceA.center, faceB.center);
+
+      if (distance > maxProximity) {
+        continue;
+      }
+
+      // Calculate normal alignment (dot product)
       const alignment = normalAlignment(faceA.normal, faceB.normal);
+
+      // For face-to-face contact: normals should be opposing (alignment < -0.8)
+      // For cylindrical interfaces: normals might be aligned or perpendicular
+      const isFaceToFace = faceA.faceType === 'planar' && faceB.faceType === 'planar' && alignment < -0.8;
+      const isCylindricalMatch = faceA.faceType === 'cylindrical' && faceB.faceType === 'cylindrical';
+
+      if (!isFaceToFace && !isCylindricalMatch) {
+        continue;
+      }
 
       // Classify interface type
       const interfaceType = classifyInterface(
@@ -99,8 +124,8 @@ function findInterfacesBetweenParts(
         faceB.radius
       );
 
-      // Skip if no valid interface
-      if (interfaceType === 'unknown' && Math.abs(alignment) < 0.5) {
+      // Skip unknown interfaces entirely - we only want real mating surfaces
+      if (interfaceType === 'unknown') {
         continue;
       }
 
@@ -111,35 +136,50 @@ function findInterfacesBetweenParts(
         (faceA.center[2] + faceB.center[2]) / 2,
       ];
 
-      // Estimate contact area
-      const contactArea = estimateContactArea(faceA, faceB, interfaceType);
+      // Calculate a quality score for ranking
+      const alignmentScore = Math.abs(alignment);
+      const proximityScore = 1 / (1 + distance / 10); // Closer is better
+      const score = alignmentScore * proximityScore;
 
-      if (contactArea < params.minContactArea) {
-        continue;
-      }
-
-      interfaces.push({
-        id: `interface-${id++}`,
-        partA: {
-          partId: partA.id,
-          faceId: partA.faces[idxA].globalId,
+      candidates.push({
+        interface: {
+          id: `interface-${id++}`,
+          partA: {
+            partId: partA.id,
+            faceId: partA.faces[idxA].globalId,
+          },
+          partB: {
+            partId: partB.id,
+            faceId: partB.faces[idxB].globalId,
+          },
+          interfaceType,
+          proximity: distance,
+          normalAlignment: Math.abs(alignment),
+          contactArea: estimateContactArea(faceA, faceB, interfaceType),
+          defaultTolerance: getDefaultTolerance(interfaceType),
+          defaultDistribution: 'normal',
+          contactPoint,
         },
-        partB: {
-          partId: partB.id,
-          faceId: partB.faces[idxB].globalId,
-        },
-        interfaceType,
-        proximity: distance,
-        normalAlignment: Math.abs(alignment),
-        contactArea,
-        defaultTolerance: getDefaultTolerance(interfaceType),
-        defaultDistribution: 'normal',
-        contactPoint,
+        score,
       });
     }
   }
 
-  return interfaces;
+  // Sort by score (best first) and limit to top interfaces
+  candidates.sort((a, b) => b.score - a.score);
+
+  // Keep only top 10 interfaces per part pair to avoid overwhelming the UI
+  const MAX_INTERFACES_PER_PAIR = 10;
+  return candidates.slice(0, MAX_INTERFACES_PER_PAIR).map(c => c.interface);
+}
+
+/**
+ * Get diagonal of bounding box for proximity scaling
+ */
+function getBoundingBoxDiagonal(part: AssemblyPart): number {
+  if (!part.boundingBox) return 100;
+  const dims = part.boundingBox.dimensions;
+  return Math.sqrt(dims[0] * dims[0] + dims[1] * dims[1] + dims[2] * dims[2]);
 }
 
 interface TransformedFace {

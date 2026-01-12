@@ -7,21 +7,25 @@ import { createNewLink } from '../../lib/tolerance/types';
 interface ChainBuilderProps {
   chain: ToleranceChain | null;
   onCreateChain: (name: string) => void;
+  onAutoGenerate?: () => void;
   onAddLink: (link: ChainLink) => void;
   onUpdateLink: (linkId: string, updates: Partial<ChainLink>) => void;
   onRemoveLink: (linkId: string) => void;
   onCalculate: () => void;
   isCalculating: boolean;
+  hasPartsAndInterfaces?: boolean;
 }
 
 export function ChainBuilder({
   chain,
   onCreateChain,
+  onAutoGenerate,
   onAddLink,
   onUpdateLink,
   onRemoveLink,
   onCalculate,
   isCalculating,
+  hasPartsAndInterfaces = false,
 }: ChainBuilderProps) {
   const [newChainName, setNewChainName] = useState('');
   const [showAddLink, setShowAddLink] = useState(false);
@@ -68,6 +72,21 @@ export function ChainBuilder({
         <div className="chain-builder-header">
           <span className="chain-builder-title">Tolerance Chain</span>
         </div>
+
+        {/* Auto-Generate Button - Primary action */}
+        {hasPartsAndInterfaces && onAutoGenerate && (
+          <button
+            className="auto-generate-btn"
+            onClick={onAutoGenerate}
+          >
+            Auto-Generate Stackup from Geometry
+          </button>
+        )}
+
+        <div className="chain-divider">
+          <span>or create manually</span>
+        </div>
+
         <div className="chain-create-form">
           <input
             type="text"
@@ -86,9 +105,8 @@ export function ChainBuilder({
           </button>
         </div>
         <div className="chain-build-instructions">
-          <div className="chain-build-step">Create a tolerance chain to begin</div>
           <div className="chain-build-hint">
-            Add dimensions and gaps to calculate stackup
+            Auto-generate extracts dimensions from STEP geometry
           </div>
         </div>
       </div>

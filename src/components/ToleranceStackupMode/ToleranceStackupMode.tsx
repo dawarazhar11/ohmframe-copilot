@@ -206,6 +206,69 @@ export function ToleranceStackupMode({
     }
   };
 
+  // Auto-generate a tolerance chain from detected parts and interfaces
+  const handleAutoGenerate = useCallback(() => {
+    if (parts.length === 0) return;
+
+    const chainId = `chain-${Date.now()}`;
+    const links: ChainLink[] = [];
+
+    // Add part dimensions based on bounding boxes
+    parts.forEach((part, idx) => {
+      // Calculate the largest dimension (assume stackup direction is the largest)
+      const dims = part.boundingBox?.dimensions || [50, 50, 50];
+      const maxDim = Math.max(...dims);
+
+      // Create a link for this part's contribution
+      links.push({
+        id: `link-part-${idx}`,
+        type: 'part_dimension',
+        name: `${part.name} Length`,
+        partId: part.id,
+        nominal: maxDim,
+        plusTolerance: maxDim * 0.001, // Default 0.1% tolerance
+        minusTolerance: maxDim * 0.001,
+        direction: idx % 2 === 0 ? 'positive' : 'negative', // Alternate directions
+        distribution: 'normal',
+        sigma: 3,
+      });
+    });
+
+    // Add interface gaps from detected interfaces (top 3 best ones)
+    const topInterfaces = interfaces
+      .filter(iface => iface.interfaceType !== 'unknown')
+      .slice(0, 3);
+
+    topInterfaces.forEach((iface, idx) => {
+      links.push({
+        id: `link-iface-${idx}`,
+        type: 'interface_gap',
+        name: `Interface Gap ${idx + 1}`,
+        interfaceId: iface.id,
+        nominal: iface.proximity || 0.05, // Use detected proximity as gap
+        plusTolerance: iface.defaultTolerance,
+        minusTolerance: iface.defaultTolerance,
+        direction: 'positive',
+        distribution: 'normal',
+        sigma: 3,
+      });
+    });
+
+    const newChain: ToleranceChain = {
+      id: chainId,
+      name: 'Auto-Generated Stackup',
+      direction: [1, 0, 0], // X-direction default
+      links,
+      isCalculated: false,
+      isComplete: links.length >= 2,
+    };
+
+    setChains((prev) => [...prev, newChain]);
+    setActiveChainId(chainId);
+    setResult(null);
+    onStatusChange?.(`Auto-generated chain with ${links.length} links`);
+  }, [parts, interfaces, onStatusChange]);
+
   // Chain management
   const handleCreateChain = useCallback((name: string) => {
     const newChain = createNewChain(`chain-${Date.now()}`, name);
@@ -419,6 +482,8 @@ export function ToleranceStackupMode({
           <ChainBuilder
             chain={activeChain}
             onCreateChain={handleCreateChain}
+            onAutoGenerate={handleAutoGenerate}
+            hasPartsAndInterfaces={parts.length > 0}
             onAddLink={handleAddLink}
             onUpdateLink={handleUpdateLink}
             onRemoveLink={handleRemoveLink}
