@@ -19,7 +19,7 @@ ohmframe-ecosystem/
 - `../ohmframe-website/` - Marketing site with /ai/copilot download page
 - `../docs/ai-apps.md` - Comprehensive AI tools roadmap
 
-**API Dependencies:**
+**API Dependencies (all hosted on Contabo VPS, no VPN needed):**
 - `ai.ohmframe.com/api/vision` - DFM image analysis
 - `ai.ohmframe.com/api/cost/estimate` - Cost estimation
 - `ai.ohmframe.com/api/chat` - Engineering chat
